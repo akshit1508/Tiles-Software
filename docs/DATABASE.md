@@ -1,1565 +1,1433 @@
-# Tile Management System — Database Design
+Goverdhan Traders — Production Database Design
 
-## 1. Database Overview
+1. Purpose
 
-Database technology:
+This document defines the production database architecture for the Goverdhan Traders Tile Management System.
 
-```text
-MongoDB
-```
+The database must support:
+
+Authentication for the shop owner
+
+Tile product management
+
+Physical inventory tracking
+
+Customers
+
+Orders containing multiple products
+
+Partial/full payments
+
+Outstanding amounts
+
+Inventory movement history
+
+Sales and reporting
+
+This document is the database source-of-truth for implementation. The AI agent must follow it and must not invent a conflicting data model.
+
+2. Technology
 
 Production database:
 
-```text
 MongoDB Atlas
-```
 
-The database stores the persistent business data for:
+Backend:
 
-* Users
-* Products
-* Customers
-* Orders
-* Payments
-* Inventory
-* Inventory history
+NestJS + Mongoose
 
-The database is the persistent source of truth for the business application.
+Application flow:
 
----
-
-# 2. Application Architecture
-
-The application consists of:
-
-```text
 Browser
-   ↓
-Next.js Frontend
-   ↓
-NestJS Backend API
-   ↓
-MongoDB
-```
+   ↓ HTTPS
+Next.js Web Application
+   ↓ HTTPS REST API
+NestJS API
+   ↓ Mongoose
+MongoDB Atlas
 
-The frontend must NEVER connect directly to MongoDB.
+The browser/frontend must NEVER connect directly to MongoDB.
 
-All database operations must happen through the NestJS backend.
+MongoDB credentials, connection strings, and database access must remain server-side.
 
-MongoDB credentials and connection strings must remain server-side.
+3. V1 Collections
 
----
+The V1 database contains these seven collections:
 
-# 3. Main Collections
-
-The initial database domain will contain collections similar to:
-
-```text
 users
 products
+inventories
 customers
 orders
 payments
 inventory_transactions
-```
 
-Additional collections may be introduced later only when there is a clear business or architectural requirement.
+Collection responsibilities
 
-The AI agent must not create unnecessary collections without justification.
+Collection
 
----
+Responsibility
 
-# 4. User Collection
+users
 
-The `users` collection represents authenticated application users.
+Authentication and owner account
 
-V1 has only one user: the business owner.
+products
 
-Expected information:
+Tile/product master data
 
-```text
-User
-├── id
-├── name
-├── email
-├── passwordHash
-├── role
-├── createdAt
-└── updatedAt
-```
+inventories
 
-The password itself must NEVER be stored.
+Current physical stock state
 
-Only a secure password hash may be stored.
+customers
 
-The password hash must never be returned through an API response.
+Customer master data
 
----
+orders
 
-# 5. Product Collection
+Historical sales/order documents
 
-The `products` collection represents tile products.
+payments
 
-Expected information:
+Individual payment transactions
 
-```text
-Product
-├── id
-├── brand
-├── productName
-├── gallaNumber
-├── category
-├── size
-├── finish
-├── color
-├── piecesPerBox
-├── areaPerBox
-├── purchasePrice
-├── sellingPrice
-├── minimumStock
-├── images
-├── createdAt
-└── updatedAt
-```
+inventory_transactions
 
----
+Immutable-ish inventory movement history
 
-# 6. Product Fields
+No additional collection should be introduced without a clear business or architectural reason and documentation in DECISIONS.md.
 
-## Brand
+4. General Data Rules
 
-The tile brand.
+4.1 IDs
 
-Example:
+MongoDB ObjectId is the default identifier type for persisted documents and references unless implementation has a documented reason to use another identifier.
 
-```text
-Kajaria
-```
+4.2 Timestamps
 
----
+All primary business documents should contain:
 
-## Product Name
+createdAt
+updatedAt
 
-The name/identifier of the tile product.
+Business-event documents such as payments and inventory transactions should also contain their event date/time where required.
 
-Example:
+Store timestamps consistently in UTC at the database/application boundary. Display local Indian time in the UI when required.
 
-```text
-Royal Marble
-```
+4.3 Money
 
----
+Money must not rely on JavaScript floating-point arithmetic for persisted financial values.
 
-## Galla Number
+MongoDB/Mongoose should use:
 
-The physical storage/location identifier used by the shop.
+Decimal128
 
-Example:
+for monetary fields such as:
 
-```text
-G-24
-```
+purchasePrice
+sellingPrice
+unitPrice
+lineTotal
+subtotal
+totalAmount
+payment.amount
 
----
+The API should serialize monetary values consistently for the frontend.
 
-## Category
+4.4 Physical quantities
 
-The product category.
-
-Example:
-
-```text
-Floor Tile
-Wall Tile
-```
-
-The final category structure will be decided during implementation.
-
----
-
-## Size
-
-The physical tile size.
-
-Example:
-
-```text
-4x2
-```
-
-The exact storage representation will be finalized during implementation.
-
----
-
-## Finish
-
-Example:
-
-```text
-Glossy
-Matt
-```
-
----
-
-## Color
-
-Example:
-
-```text
-White
-Grey
-Beige
-```
-
----
-
-## Pieces Per Box
-
-Defines how many complete tiles are contained in one complete box.
-
-Example:
-
-```text
-piecesPerBox = 4
-```
-
-This value must be greater than zero.
-
----
-
-## Area Per Box
-
-Defines the total square-foot coverage represented by one complete box.
-
-Example:
-
-```text
-areaPerBox = 8 sq.ft
-```
-
-This value must be greater than zero.
-
----
-
-# 7. Product Measurement Relationship
-
-The system uses:
-
-```text
-piecesPerBox
-areaPerBox
-```
-
-to determine the relationship between boxes, pieces and square feet.
-
-Example:
-
-```text
-piecesPerBox = 4
-areaPerBox = 8 sq.ft
-```
+Physical tile quantities are whole pieces.
 
 Therefore:
 
-```text
-1 Box = 4 Pieces
-1 Box = 8 sq.ft
-1 Piece = 2 sq.ft
-```
+physicalPieces = integer >= 0
 
-The system should calculate the area per piece rather than requiring the owner to enter it separately.
+Fractional physical pieces are never allowed.
 
-Formula:
+4.5 Area quantities
 
-```text
-areaPerPiece =
-areaPerBox / piecesPerBox
-```
+Square-foot quantities may be decimal values and should use a precision-safe representation such as MongoDB Decimal128.
 
----
+5. Users Collection
 
-# 8. Product Price Fields
+Collection:
 
-The product may contain:
+users
 
-```text
-purchasePrice
-sellingPrice
-```
+V1 has one active business owner account. The schema should still contain a role so authorization is explicit and future expansion remains possible.
 
-These represent product-level business pricing information.
+Fields
 
-V1 does not implement customer-specific pricing.
+User
+├── _id: ObjectId
+├── name: string
+├── email: string
+├── passwordHash: string
+├── role: OWNER
+├── isActive: boolean
+├── createdAt: Date
+└── updatedAt: Date
 
-There are no:
+Rules
 
-```text
-Customer Price Lists
-Wholesale Price Tiers
-Retail Price Tiers
-Customer-specific Price Rules
-```
+email is required and normalized consistently, normally lowercase.
 
-The actual transaction/order amount is recorded with the order.
+email must be unique.
 
-Historical orders must retain the amount applicable when that order was created.
+passwordHash is required.
 
-Changing the current product price must not change historical order amounts.
+Plain-text passwords must NEVER be stored.
 
----
+passwordHash must NEVER be returned by API responses.
 
-# 9. Product Images
+Inactive users must not authenticate.
 
-A product may have multiple images.
+V1 role is OWNER.
 
-The database should store image references/URLs rather than unnecessarily storing large binary image data directly inside the product document.
+6. Products Collection
 
-Conceptually:
+Collection:
 
-```text
-images:
-[
-    {
-        url: "...",
-        ...
-    }
-]
-```
+products
 
-The exact image-storage provider will be decided during implementation.
+Products represent tile master information. Current stock does not live in this collection.
 
----
+Fields
 
-# 10. Inventory Design
+Product
+├── _id: ObjectId
+├── brand: string
+├── productName: string
+├── gallaNumber: string
+├── category: string
+├── size: string
+├── finish: string
+├── color: string
+├── piecesPerBox: integer
+├── areaPerBox: Decimal128
+├── purchasePrice: Decimal128
+├── sellingPrice: Decimal128
+├── minimumStockPieces: integer
+├── images: ImageReference[]
+├── isActive: boolean
+├── createdAt: Date
+└── updatedAt: Date
 
-Inventory is separate from basic product information.
+Validation
 
-The system must accurately track physical tile inventory.
+piecesPerBox > 0
+areaPerBox > 0
+purchasePrice >= 0
+sellingPrice >= 0
+minimumStockPieces >= 0
 
-The inventory must support:
+Product deactivation
 
-```text
-Boxes
-Pieces
-Square Feet
-```
+Products must not be casually hard-deleted when historical orders or inventory transactions reference them.
 
-However, these quantities should not be treated as three independently editable values.
+Use:
 
-The system needs a canonical physical inventory representation to prevent inconsistent values.
+isActive = false
 
----
+for normal product removal from active operations.
 
-# 11. Canonical Inventory Quantity
+Historical orders must continue to work after product deactivation.
 
-Because tiles are physical whole pieces, the recommended canonical inventory quantity is:
+7. Product Measurement Model
 
-```text
-Total Available Whole Pieces
-```
+The product stores:
 
-For example:
-
-```text
-totalPieces = 37
-```
-
-The system can derive:
-
-```text
-Complete Boxes
-Loose Pieces
-Total Square Feet
-```
-
-using the product's:
-
-```text
 piecesPerBox
 areaPerBox
-```
-
----
-
-# 12. Inventory Conversion
-
-Given:
-
-```text
-totalPieces = T
-piecesPerBox = P
-areaPerBox = A
-```
-
-The system calculates:
-
-```text
-Complete Boxes =
-floor(T / P)
-
-Loose Pieces =
-T % P
-
-Area Per Piece =
-A / P
-
-Total Square Feet =
-T × Area Per Piece
-```
 
 Example:
 
-```text
-piecesPerBox = 4
-areaPerBox = 8
-totalPieces = 37
-```
-
-Result:
-
-```text
-Complete Boxes = 9
-Loose Pieces = 1
-Total Pieces = 37
-Total Area = 74 sq.ft
-```
-
----
-
-# 13. Stock Receiving
-
-Stock always arrives at the shop in complete boxes.
-
-Therefore stock receiving is entered in:
-
-```text
-Boxes
-```
-
-Example:
-
-```text
-Stock received = 20 boxes
-```
-
-If:
-
-```text
-1 box = 4 pieces
-```
-
-then:
-
-```text
-20 boxes = 80 pieces
-```
-
-If:
-
-```text
-1 box = 8 sq.ft
-```
-
-then:
-
-```text
-20 boxes = 160 sq.ft
-```
-
-The owner should not need to manually enter equivalent pieces or square feet for normal stock receiving.
-
-The backend calculates the physical equivalent.
-
----
-
-# 14. Inventory Transactions Collection
-
-The `inventory_transactions` collection records important inventory changes.
-
-Conceptually:
-
-```text
-InventoryTransaction
-├── id
-├── productId
-├── transactionType
-├── quantity
-├── unit
-├── physicalQuantity
-├── physicalUnit
-├── reason
-├── orderId
-├── createdAt
-└── createdBy
-```
-
-Not every field is required for every transaction.
-
-For example:
-
-```text
-orderId
-```
-
-is relevant for a sale but may not be relevant for a damage transaction.
-
----
-
-# 15. Inventory Transaction Types
-
-Initial transaction types:
-
-```text
-STOCK_IN
-SALE
-DAMAGE
-ADJUSTMENT
-```
-
-Additional transaction types can be added later if required.
-
----
-
-# 16. Stock-In Transaction
-
-Stock-in represents new tile stock arriving at the shop.
-
-Because stock always arrives as complete boxes, the transaction records the received box quantity.
-
-Example:
-
-```text
-quantity = 20
-unit = BOX
-```
-
-The backend converts this into the equivalent whole-piece quantity.
-
-Example:
-
-```text
-20 boxes × 4 pieces per box
-=
-80 pieces
-```
-
-The inventory transaction should preserve enough information to understand the original stock-in event.
-
----
-
-# 17. Selling Units
-
-The system allows products to be sold by:
-
-```text
-BOX
-PIECE
-SQ_FT
-```
-
-These are valid sales units.
-
-However, physical inventory must always represent whole physical tiles.
-
----
-
-# 18. Selling by Box
-
-Example:
-
-```text
-1 box = 4 pieces
-1 box = 8 sq.ft
-```
-
-Customer buys:
-
-```text
-3 boxes
-```
-
-Physical inventory consumption:
-
-```text
-3 boxes × 4 pieces
-=
-12 pieces
-```
-
-The order item can preserve:
-
-```text
-salesQuantity = 3
-salesUnit = BOX
-
-physicalQuantity = 12
-physicalUnit = PIECE
-```
-
----
-
-# 19. Selling by Piece
-
-The owner can sell individual whole tiles.
-
-Example:
-
-```text
-Customer buys 3 pieces
-```
-
-Inventory decreases by:
-
-```text
-3 whole pieces
-```
-
-No fractional physical pieces are allowed.
-
----
-
-# 20. Selling by Square Feet
-
-The owner can enter a square-foot quantity when preparing an order.
-
-The backend converts the requested square-foot quantity into whole pieces.
-
-Example:
-
-```text
 piecesPerBox = 4
 areaPerBox = 8 sq.ft
 
-areaPerPiece =
-8 / 4
-=
-2 sq.ft
-```
+Therefore:
 
-If the owner enters:
+1 BOX = 4 PIECES
+1 BOX = 8 SQ_FT
+1 PIECE = 2 SQ_FT
 
-```text
-6 sq.ft
-```
+Formula:
 
-the system calculates:
+areaPerPiece = areaPerBox / piecesPerBox
 
-```text
-6 / 2
-=
-3 pieces
-```
+areaPerPiece should normally be derived rather than stored as an independently editable value.
 
-Therefore inventory decreases by:
+8. Product Images
 
-```text
-3 whole pieces
-```
+Images are references, not large binary blobs stored directly in the product document.
 
-The order item should preserve both:
+Conceptually:
 
-```text
-salesQuantity = 6
-salesUnit = SQ_FT
+images: [
+  {
+    url: string,
+    publicId?: string,
+    alt?: string
+  }
+]
 
-physicalQuantity = 3
-physicalUnit = PIECE
-```
+The final external image provider is a separate implementation decision.
 
----
+Do not store provider credentials in MongoDB documents.
 
-# 21. Square-Foot Validation
+9. Inventory Collection
 
-Because tiles cannot be cut, a square-foot sale must correspond to a whole number of physical pieces.
+Collection:
 
-Example:
+inventories
 
-```text
-1 piece = 2 sq.ft
-```
+There is exactly one current inventory document per product in V1.
 
-Valid:
+Fields
 
-```text
-2 sq.ft = 1 piece
-4 sq.ft = 2 pieces
-6 sq.ft = 3 pieces
-8 sq.ft = 4 pieces
-```
+Inventory
+├── _id: ObjectId
+├── productId: ObjectId
+├── totalPieces: integer
+├── createdAt: Date
+└── updatedAt: Date
 
-Invalid:
+A unique index must exist on:
 
-```text
-1 sq.ft
-3 sq.ft
-5 sq.ft
-```
+productId
 
-because these would require fractional physical pieces.
+Source of truth
 
-The backend must reject an invalid square-foot quantity.
+The canonical current physical quantity is:
 
-The frontend may also validate this for better user experience, but backend validation is mandatory.
+totalPieces
 
----
+Do NOT independently persist editable values for:
 
-# 22. Partial / Open Boxes
+fullBoxes
+loosePieces
+totalSqFt
 
-The inventory must support opened boxes.
+Those values are derived from the product measurement data and totalPieces.
 
-Example:
+10. Inventory Derived Values
 
-```text
-1 box = 4 pieces
+Given:
 
-Starting inventory:
+T = totalPieces
+P = piecesPerBox
+A = areaPerBox
 
-10 boxes
-=
-40 pieces
-```
+Calculate:
 
-Customer purchases:
+fullBoxes = floor(T / P)
 
-```text
-3 pieces
-```
+loosePieces = T % P
 
-Remaining physical inventory:
+areaPerPiece = A / P
 
-```text
-9 complete boxes
-1 loose piece
-```
-
-The system must preserve the loose piece.
-
-It must not incorrectly reduce the stock from:
-
-```text
-10 boxes
-```
-
-to:
-
-```text
-9 boxes
-```
-
-without accounting for the remaining loose piece.
-
----
-
-# 23. Damaged Stock
-
-Damaged or broken tiles must be recorded as inventory transactions.
+totalSqFt = T × areaPerPiece
 
 Example:
 
-```text
-2 damaged pieces
-```
+piecesPerBox = 4
+areaPerBox = 8 sq.ft
+totalPieces = 37
 
-The canonical physical inventory decreases by:
+Result:
 
-```text
-2 pieces
-```
+fullBoxes = 9
+loosePieces = 1
+totalSqFt = 74 sq.ft
 
-The transaction should preserve:
+These derived values are presentation/calculation values, not independent inventory sources of truth.
 
-```text
-transactionType = DAMAGE
-quantity = 2
-unit = PIECE
-reason = ...
-```
+11. Stock Receiving
 
-If a complete box is damaged:
+Stock arrives in complete boxes.
 
-```text
-1 box
-```
+The stock-in UI accepts:
 
-the system converts the box to the appropriate number of physical pieces.
-
----
-
-# 24. Manual Inventory Adjustment
-
-The owner may need to adjust inventory because of:
-
-* Physical stock count differences
-* Data-entry mistakes
-* Missing tiles
-* Found stock
-* Other legitimate business reasons
-
-Adjustments must create inventory history.
+quantity = boxes
+unit = BOX
 
 Example:
 
-```text
-Adjustment:
--3 pieces
+20 BOX
 
-Reason:
-Physical stock count difference
-```
+If:
 
-The previous history must not be silently overwritten.
+piecesPerBox = 4
 
----
+then:
 
-# 25. Inventory History
+physicalPieces = 20 × 4 = 80
 
-Every important inventory movement should create a history record.
+The backend increments:
 
-Examples:
+totalPieces += 80
 
-```text
-STOCK_IN
-SALE
-DAMAGE
-ADJUSTMENT
-```
+The backend creates an inventory transaction recording the stock-in event.
 
-Inventory history should make it possible to answer:
+The normal stock-in operation must not require the owner to manually enter equivalent pieces or square feet.
 
-```text
-When did stock change?
-Why did it change?
-Which product changed?
-How much changed?
-Was it connected to an order?
-Who performed the operation?
-```
+12. Selling Units
 
----
+The only supported V1 sales units are:
 
-# 26. Inventory Availability
-
-Before an order is completed, the backend must verify that sufficient inventory exists.
-
-The frontend's displayed stock is not authoritative.
-
-Example:
-
-Available:
-
-```text
-3 pieces
-```
-
-Attempted sale:
-
-```text
-4 pieces
-```
-
-The backend must reject the sale.
-
-The same rule applies to sales entered as:
-
-```text
 BOX
 PIECE
 SQ_FT
-```
 
-The backend converts the requested quantity into physical pieces and validates availability.
+The API should use controlled enum values rather than arbitrary strings.
 
----
+13. Locked Rule — BOX Sale
 
-# 27. Customer Collection
+A BOX sale consumes complete boxes only.
 
-The `customers` collection represents business customers.
+Example:
 
-Expected information:
+Inventory:
+10 complete boxes
 
-```text
-Customer
-├── id
-├── name
-├── phone
-├── address
-├── createdAt
-└── updatedAt
-```
+Customer buys:
+3 BOX
 
----
+Consumption:
 
-# 28. Customer Relationships
+3 × piecesPerBox
 
-A customer can have multiple orders.
+If:
+
+piecesPerBox = 4
+
+then:
+
+physicalPieces = 12
+
+The sale must have enough complete boxes available.
+
+Important
+
+A BOX sale must not silently consume a combination of loose pieces and a partial box.
+
+If only:
+
+2 complete boxes + 3 loose pieces
+
+are available, a sale of:
+
+3 BOX
+
+must be rejected.
+
+14. Locked Rule — PIECE and SQ_FT Sale
+
+For PIECE and SQ_FT sales, the inventory consumption strategy is:
+
+1. Consume existing loose pieces first.
+2. If more pieces are required, open complete boxes as needed.
+3. Consume whole physical pieces only.
+
+Example:
+
+9 full boxes + 1 loose piece
+piecesPerBox = 4
+
+Customer buys:
+
+3 PIECE
+
+After sale:
+
+8 full boxes + 2 loose pieces
+
+The canonical stock changes by:
+
+totalPieces -= 3
+
+The physical arrangement is derived from the new total piece count.
+
+15. Selling by Piece
+
+For:
+
+salesUnit = PIECE
+
+rules are:
+
+salesQuantity > 0
+salesQuantity must be an integer
+physicalPieces = salesQuantity
+
+No fractional physical pieces are allowed.
+
+16. Selling by Square Feet
+
+For:
+
+salesUnit = SQ_FT
+
+backend calculation:
+
+areaPerPiece = areaPerBox / piecesPerBox
+physicalPieces = requestedSqFt / areaPerPiece
+
+The result must represent a whole number of physical pieces.
+
+Example:
+
+piecesPerBox = 4
+areaPerBox = 8
+areaPerPiece = 2
+
+requested = 6 sq.ft
+
+6 / 2 = 3 pieces
+
+Therefore:
+
+physicalPieces = 3
+
+17. Square-Foot Validation
+
+Because tiles cannot be cut, a square-foot sale is valid only when the requested area corresponds to a whole number of pieces.
+
+Example:
+
+1 piece = 2 sq.ft
+
+Valid:
+
+2 sq.ft
+4 sq.ft
+6 sq.ft
+8 sq.ft
+
+Invalid:
+
+1 sq.ft
+3 sq.ft
+5 sq.ft
+
+The backend must perform this validation. Frontend validation is only a user-experience improvement.
+
+Precision
+
+Because area may be decimal, the implementation must use a precision-safe decimal representation and a documented comparison/tolerance strategy. It must never use unsafe binary floating-point equality for financial/measurement validation.
+
+18. Order Item Quantity Snapshot
+
+Every order item must preserve both the customer's sales unit and the physical inventory consumption.
 
 Conceptually:
 
-```text
+OrderItem
+├── productId: ObjectId
+├── productNameSnapshot: string
+├── brandSnapshot: string
+├── salesQuantity: Decimal128/integer according to unit
+├── salesUnit: BOX | PIECE | SQ_FT
+├── physicalPieces: integer
+├── unitPrice: Decimal128
+├── lineTotal: Decimal128
+└── optional measurement snapshots
+
+Examples:
+
+Box
+
+salesQuantity = 3
+salesUnit = BOX
+physicalPieces = 12
+
+Piece
+
+salesQuantity = 3
+salesUnit = PIECE
+physicalPieces = 3
+
+Square feet
+
+salesQuantity = 6
+salesUnit = SQ_FT
+physicalPieces = 3
+
+19. Orders Collection
+
+Collection:
+
+orders
+
+Order items are embedded inside the order document in V1.
+
+This is intentional because an order is a bounded business document and its items belong to the order's historical record.
+
+Fields
+
+Order
+├── _id: ObjectId
+├── orderNumber: string
+├── customerId: ObjectId
+├── items: OrderItem[]
+├── subtotal: Decimal128
+├── totalAmount: Decimal128
+├── status: enum
+├── createdAt: Date
+├── updatedAt: Date
+└── createdBy: ObjectId
+
+The final order-status enum must be documented consistently in API.md and BUSINESS-RULES.md.
+
+At minimum, the implementation must distinguish a valid completed sale from a cancelled order.
+
+20. Order Product Snapshot
+
+Historical order data must not depend on the current product document.
+
+At order creation/completion, snapshot the product information required to display and understand the historical transaction.
+
+At minimum:
+
+productId
+productNameSnapshot
+brandSnapshot
+unitPrice
+salesQuantity
+salesUnit
+physicalPieces
+lineTotal
+
+If product measurement information is needed to explain historical quantity, the relevant measurement values should also be snapshotted.
+
+Changing the current product name, measurement or selling price must not rewrite an existing order.
+
+21. Order Amount and Pricing
+
+V1 does not implement customer-specific pricing tiers.
+
+There are no:
+
+customer-specific price lists
+wholesale tiers
+retail tiers
+customer pricing rules
+
+The order stores the actual transaction amount applicable to that sale.
+
+Product-level purchasePrice and sellingPrice are business reference values only; the historical order uses its own price snapshot.
+
+Backend calculations must validate the order totals before persistence.
+
+22. Customers Collection
+
+Collection:
+
+customers
+
+Fields
+
 Customer
-   │
+├── _id: ObjectId
+├── name: string
+├── phone: string
+├── address: string
+├── isActive: boolean
+├── createdAt: Date
+└── updatedAt: Date
+
+Customer outstanding must NOT be treated as a manually editable source-of-truth field.
+
+Orders and payments are authoritative.
+
+23. Customer Relationships
+
+One customer can have many orders:
+
+Customer
    ├── Order 1
    ├── Order 2
    └── Order 3
-```
 
-Orders reference the customer.
+The customer document stores customer information, not duplicated full order documents.
 
-The customer document should not contain duplicated complete order documents unless there is a specific architectural reason.
+Orders reference:
 
----
-
-# 29. Customer Payments
-
-A customer can have multiple payments.
-
-Payments should reference:
-
-```text
 customerId
-```
 
-and, when applicable:
+24. Payments Collection
 
-```text
-orderId
-```
+Collection:
 
-This allows the system to provide:
+payments
 
-* Customer payment history
-* Order payment history
-* Customer outstanding amount
+Each payment is an individual financial transaction.
 
----
+Fields
 
-# 30. Order Collection
-
-The `orders` collection represents a customer transaction.
-
-Conceptually:
-
-```text
-Order
-├── id
-├── customerId
-├── items
-├── totalAmount
-├── status
-├── createdAt
-└── updatedAt
-```
-
-Additional fields may be added when required.
-
----
-
-# 31. Order Items
-
-One order can contain multiple products.
-
-Conceptually:
-
-```text
-Order
-│
-├── OrderItem
-│     ├── productId
-│     ├── salesQuantity
-│     ├── salesUnit
-│     ├── physicalQuantity
-│     └── physicalUnit
-│
-├── OrderItem
-│     ├── productId
-│     ├── salesQuantity
-│     ├── salesUnit
-│     ├── physicalQuantity
-│     └── physicalUnit
-│
-└── ...
-```
-
-Because MongoDB supports embedded documents, order items can be embedded inside the order document when appropriate.
-
-The final implementation should prioritize historical correctness and efficient order retrieval.
-
----
-
-# 32. Order Quantity Example — Box
-
-Example:
-
-```text
-Product:
-Royal Marble
-
-Pieces Per Box:
-4
-
-Sales:
-2 Boxes
-```
-
-Order item may contain:
-
-```text
-salesQuantity = 2
-salesUnit = BOX
-
-physicalQuantity = 8
-physicalUnit = PIECE
-```
-
----
-
-# 33. Order Quantity Example — Piece
-
-Example:
-
-```text
-Sales:
-3 Pieces
-```
-
-Order item:
-
-```text
-salesQuantity = 3
-salesUnit = PIECE
-
-physicalQuantity = 3
-physicalUnit = PIECE
-```
-
----
-
-# 34. Order Quantity Example — Square Feet
-
-Example:
-
-```text
-Area Per Piece = 2 sq.ft
-
-Customer purchases:
-6 sq.ft
-```
-
-Order item:
-
-```text
-salesQuantity = 6
-salesUnit = SQ_FT
-
-physicalQuantity = 3
-physicalUnit = PIECE
-```
-
-This allows the application to preserve what was entered as the sales quantity while maintaining accurate physical inventory.
-
----
-
-# 35. Historical Product Information
-
-Orders must preserve the relevant product information required for historical accuracy.
-
-The system must not rely entirely on the current product document to reconstruct an old order.
-
-For example:
-
-```text
-Product selling price today = ₹1,200
-```
-
-does not mean an order created earlier should automatically change to:
-
-```text
-₹1,200
-```
-
-Historical order information must remain unchanged.
-
-The exact snapshot fields will be finalized during implementation.
-
----
-
-# 36. Order Amount
-
-The actual transaction/order amount is associated with the order.
-
-V1 does not implement customer-specific pricing.
-
-The owner records the applicable amount when preparing the transaction.
-
-Important financial calculations must be validated on the backend.
-
----
-
-# 37. Payment Collection
-
-The `payments` collection represents individual payment transactions.
-
-Expected information:
-
-```text
 Payment
-├── id
-├── customerId
-├── orderId
-├── amount
-├── paymentMethod
-├── paymentDate
-├── notes
-├── createdAt
-└── createdBy
-```
+├── _id: ObjectId
+├── customerId: ObjectId
+├── orderId: ObjectId
+├── amount: Decimal128
+├── paymentMethod: CASH | UPI | BANK_TRANSFER | CHEQUE
+├── paymentDate: Date
+├── notes?: string
+├── createdAt: Date
+└── createdBy: ObjectId
 
----
+orderId is required in V1.
 
-# 38. Payment Methods
+There are no unallocated customer payments in V1.
 
-Initial supported payment methods:
+25. Locked Rule — Payments
 
-```text
+Every payment must belong to an existing order.
+
+The system does NOT support:
+
+unallocated payment
+advance payment without an order
+customer wallet balance
+
+Example:
+
+Order = ₹45,000
+Payment = ₹20,000
+
+The payment references that order.
+
+Another payment can later reference the same order:
+
+Payment 1 = ₹20,000
+Payment 2 = ₹10,000
+Payment 3 = ₹15,000
+
+26. Payment Validation
+
+The backend must reject:
+
+amount <= 0
+payment for a non-existent order
+payment for a non-existent customer
+payment whose customerId does not match the order customer
+payment that would make total valid payments exceed order total
+
+Unless a future approved business rule explicitly introduces overpayments, overpayment must not be accepted in V1.
+
+27. Payment Methods
+
+V1 supported methods:
+
 CASH
 UPI
 BANK_TRANSFER
 CHEQUE
-```
 
-The system should use controlled values rather than arbitrary inconsistent strings.
+The backend must use controlled enum values.
 
----
+28. Outstanding Amount
 
-# 39. Multiple Payments
+Order outstanding is derived:
 
-A single order can have multiple payments.
-
-Example:
-
-```text
-Order Amount:
-₹50,000
-
-Payment 1:
-₹20,000
-UPI
-
-Payment 2:
-₹10,000
-Cash
-
-Payment 3:
-₹20,000
-Bank Transfer
-```
-
-Total paid:
-
-```text
-₹50,000
-```
-
-Outstanding:
-
-```text
-₹0
-```
-
----
-
-# 40. Partial Payment
+outstanding = totalAmount - validPaymentsTotal
 
 Example:
 
-```text
-Order Amount:
-₹50,000
-
-Payment:
-₹20,000
-```
-
-Outstanding:
-
-```text
-₹30,000
-```
-
-The payment is stored as its own transaction.
-
----
-
-# 41. Credit / Outstanding
-
-Orders may be:
-
-```text
-Fully Paid
-Partially Paid
-Unpaid / Credit
-```
-
-Outstanding amount is derived from:
-
-```text
-Order Amount
--
-Valid Payments
-```
-
-Example:
-
-```text
-Order Amount = ₹50,000
-
+Order Amount = ₹45,000
 Paid = ₹20,000
+Outstanding = ₹25,000
 
-Outstanding = ₹30,000
-```
+The system should not rely on a manually editable outstandingAmount field as the source of truth.
 
----
+If a cached/derived value is introduced for performance later, it must be treated as derived state and kept transactionally consistent.
 
-# 42. Customer Outstanding
+29. Customer Outstanding
 
-Customer-level outstanding can be calculated from the customer's orders and payments.
+Customer outstanding is derived from the customer's valid orders and payments.
 
 Conceptually:
 
-```text
 Customer Outstanding
 =
-Total Amount Due
+Sum(valid order amounts)
 -
-Total Valid Payments
-```
+Sum(valid payments)
+
+Only orders that represent valid business sales should contribute according to the final order-status rules.
+
+Cancelled orders and reversed financial records must not incorrectly increase outstanding.
+
+30. Payment History
+
+Payments represent financial history and must not be casually hard-deleted.
+
+If a future correction/reversal workflow is required, it should preserve the original financial event and record the corrective event rather than silently destroying history.
+
+31. Inventory Transactions Collection
+
+Collection:
+
+inventory_transactions
+
+This collection records every important physical inventory movement.
+
+Fields
+
+InventoryTransaction
+├── _id: ObjectId
+├── productId: ObjectId
+├── transactionType: enum
+├── physicalPieces: integer
+├── salesQuantity?: Decimal128/integer
+├── salesUnit?: BOX | PIECE | SQ_FT
+├── orderId?: ObjectId
+├── reason?: string
+├── createdAt: Date
+└── createdBy: ObjectId
+
+For a transaction that changes stock, physicalPieces represents the signed movement:
+
+positive = stock added
+negative = stock removed
+
+32. Inventory Transaction Types
+
+V1 types:
+
+STOCK_IN
+SALE
+DAMAGE
+ADJUSTMENT
+SALE_REVERSAL
+
+SALE_REVERSAL is required for cancelled orders so inventory restoration is auditable.
+
+33. Stock-In Transaction Example
+
+transactionType = STOCK_IN
+salesQuantity = 20
+salesUnit = BOX
+physicalPieces = +80
+
+where:
+
+piecesPerBox = 4
+
+34. Sale Transaction Example
+
+For a 3-piece sale:
+
+transactionType = SALE
+salesQuantity = 3
+salesUnit = PIECE
+physicalPieces = -3
+orderId = <order id>
+
+For a 6 sq.ft sale where one piece equals 2 sq.ft:
+
+transactionType = SALE
+salesQuantity = 6
+salesUnit = SQ_FT
+physicalPieces = -3
+orderId = <order id>
+
+35. Damage Transaction
 
 Example:
 
-```text
-Order 1 = ₹50,000
-Order 2 = ₹30,000
+transactionType = DAMAGE
+physicalPieces = -2
+reason = "Broken tiles"
 
-Total Due = ₹80,000
+If a complete box is damaged:
 
-Payments = ₹50,000
+physicalPieces = -piecesPerBox
 
-Outstanding = ₹30,000
-```
+The inventory history must preserve the reason and creator.
 
-The system should not rely solely on a manually edited outstanding value.
+36. Manual Adjustment
 
----
+Manual physical stock corrections must create an inventory transaction.
 
-# 43. Payment History
+Examples:
 
-Each payment should remain an individual financial transaction.
++3 pieces
+-2 pieces
 
-Payment history should preserve:
+with a reason such as:
 
-* Customer
-* Related order
-* Amount
-* Payment method
-* Date
-* Notes/reference
-* Creator
+Physical stock count correction
+Found stock
+Missing stock
+Data entry correction
 
-Payments should not be casually hard-deleted.
+The old inventory history must not be overwritten.
 
-If a correction is required, an appropriate reversal/adjustment mechanism should preserve financial history.
+37. Locked Rule — Order Cancellation and Stock Restoration
 
----
+When an order that consumed inventory is cancelled, the inventory consumed by that order must be restored automatically.
 
-# 44. Sales Data
+Example:
 
-Sales information should primarily be derived from valid/completed orders according to the application's order-status rules.
+Original sale:
+physicalPieces = -6
 
-The system should avoid unnecessarily duplicating sales totals into separate collections.
+Cancellation creates:
 
-Reports should use authoritative order data.
+SALE_REVERSAL
+physicalPieces = +6
 
----
+The cancellation must be idempotent: cancelling the same order multiple times must not restore stock multiple times.
 
-# 45. Dashboard Data
+A cancelled order must not continue contributing to active sales/outstanding calculations according to the final order-status rules.
 
-Dashboard information such as:
+38. Inventory Availability
 
-```text
-Today's Sales
-Today's Orders
-Total Customers
-Total Products
-Low Stock
-Outstanding Amount
-```
+Before completing a sale, the backend must validate stock availability.
 
-should be calculated from authoritative database records or carefully maintained derived values.
+The frontend stock display is NOT authoritative.
 
-The dashboard must not rely on manually entered totals.
+Examples:
 
----
+Available = 3 pieces
+Requested = 4 pieces
 
-# 46. Low Stock
+The backend rejects the operation.
 
-Each product contains:
+The same validation applies after converting:
 
-```text
-minimumStock
-```
+BOX → pieces
+PIECE → pieces
+SQ_FT → pieces
 
-When available inventory reaches the defined low-stock threshold, the product should be identified as low stock.
+For BOX sales, complete-box availability must additionally be checked.
 
-The exact comparison logic will be finalized during implementation.
+39. Inventory and Order Atomicity
 
-Because inventory is tracked physically in pieces and displayed in boxes/pieces/sq.ft, the implementation must define which physical quantity is used for the threshold.
+A sale can involve several related operations:
 
----
+Validate order
+Validate stock
+Create order
+Reduce inventory
+Create SALE inventory transaction
 
-# 47. Reports
+These operations must be performed with an appropriate MongoDB transaction/consistency strategy so the system does not leave partial state.
 
-The initial reporting system should support:
+The intended business behavior is:
 
-```text
+All required operations succeed
+        ↓
+COMMIT
+
+or:
+
+Any required operation fails
+        ↓
+ROLLBACK
+
+The implementation must account for MongoDB transaction deployment requirements.
+
+40. Cancellation Atomicity
+
+Order cancellation and inventory restoration should also be consistent.
+
+Conceptually:
+
+BEGIN
+
+1. Verify order exists.
+2. Verify order is cancellable.
+3. Verify it has not already been reversed.
+4. Restore consumed physical pieces.
+5. Create SALE_REVERSAL transaction.
+6. Update order status.
+
+COMMIT
+
+If any required operation fails, the transaction must not leave half-cancelled state.
+
+41. Inventory Calculation Example
+
+Starting:
+
+10 boxes
+4 pieces per box
+
+Canonical inventory:
+
+totalPieces = 40
+
+Sale:
+
+3 pieces
+
+New canonical inventory:
+
+totalPieces = 37
+
+Derived:
+
+fullBoxes = floor(37 / 4) = 9
+loosePieces = 37 % 4 = 1
+
+Sale of another 2 pieces:
+
+totalPieces = 35
+fullBoxes = 8
+loosePieces = 3
+
+42. Product Measurement Changes
+
+Product measurements such as:
+
+piecesPerBox
+areaPerBox
+
+are critical to inventory calculations.
+
+They must not be changed casually after stock and historical orders exist.
+
+If such a change is ever required, the agent must first identify:
+
+affected inventory calculations
+
+affected active stock
+
+affected historical orders
+
+affected inventory transactions
+
+migration requirements
+
+An architectural/destructive change requires explicit approval and a documented decision.
+
+Historical order snapshots must remain unchanged.
+
+43. Order Status and Financial/Inventory Semantics
+
+The final order status enum must be consistent across:
+
+BUSINESS-RULES.md
+API.md
+DATABASE.md
+
+At minimum, the implementation needs a state representing:
+
+completed/valid sale
+cancelled sale
+
+A draft state may be introduced if the UI requires an order-building workflow, but a draft must not reduce inventory or count as a completed sale.
+
+44. Reports and Dashboard
+
+Reports should be derived from authoritative business records.
+
+Initial reporting periods:
+
 Today
 This Week
 This Month
 Custom Date Range
-```
 
-Initial reports:
+Initial report areas:
 
-```text
 Sales
 Orders
 Top-selling Products
 Inventory Movement
 Customers
 Outstanding Payments
-```
 
-Report calculations must be performed consistently by the backend.
+Dashboard values such as:
 
----
+Today's Sales
+Today's Orders
+Total Customers
+Total Products
+Low Stock Products
+Outstanding Amount
 
-# 48. Order and Inventory Consistency
+must not depend on manually entered totals.
 
-Creating/completing a sale can involve multiple operations:
+45. Low Stock
 
-```text
-Create/complete order
-+
-Create order items
-+
-Reduce inventory
-+
-Create inventory transaction
-```
+The product stores:
 
-These operations must be designed so that the system does not produce inconsistent business data.
+minimumStockPieces
 
-The implementation should use an appropriate MongoDB transaction/consistency strategy where supported and appropriate.
+The inventory source of truth is:
 
-The system must avoid situations such as:
+totalPieces
 
-```text
-Order created
-but inventory not reduced
-```
+A product is low stock when:
 
-or:
+totalPieces <= minimumStockPieces
 
-```text
-Inventory reduced
-but order not successfully created
-```
+The UI may display the equivalent:
 
-when the business operation is expected to be atomic.
+full boxes
+loose pieces
+square feet
 
----
+but the threshold comparison uses whole pieces.
 
-# 49. Data Integrity
+46. Recommended Indexes
 
-The system must prevent or reject invalid states such as:
+Indexes must reflect actual query patterns.
 
-```text
-Negative physical inventory
-Fractional physical pieces
-Negative payment amounts
-Invalid order quantities
-Invalid product measurement values
-Inconsistent financial calculations
-Unauthorized modifications
-```
+users
 
-All important business validation must happen on the backend.
+email: UNIQUE
 
----
+products
 
-# 50. Deletion Strategy
+Recommended:
 
-Historical business records should not be casually hard-deleted.
-
-Especially:
-
-```text
-Orders
-Payments
-Inventory Transactions
-```
-
-represent business history.
-
-For products, deactivation/soft deletion should be preferred when historical orders or inventory transactions reference the product.
-
-The final deletion policy will be defined before implementation.
-
----
-
-# 51. Database Indexes
-
-Appropriate MongoDB indexes should be created based on actual query patterns.
-
-Likely indexed fields include:
-
-## Products
-
-```text
 brand
 productName
-gallaNumber
 category
-```
+isActive
+gallaNumber
 
-## Customers
+Do not create every possible index automatically. Indexes should be justified by query patterns.
 
-```text
+inventories
+
+productId: UNIQUE
+
+customers
+
+Recommended:
+
 phone
 name
-```
+isActive
 
-## Orders
+Phone uniqueness should only be enforced if the business explicitly requires one customer per phone number.
 
-```text
-customerId
-createdAt
-status
-```
+orders
 
-## Payments
+Recommended compound/query indexes:
 
-```text
-customerId
+customerId + createdAt
+status + createdAt
+orderNumber: UNIQUE
+
+payments
+
+Recommended:
+
+orderId + paymentDate
+customerId + paymentDate
+
+inventory_transactions
+
+Recommended:
+
+productId + createdAt
 orderId
-paymentDate
-```
+transactionType + createdAt
 
-## Inventory Transactions
+Final indexes should be reviewed against real API queries before production.
 
-```text
-productId
-createdAt
-transactionType
-```
+47. Referential Integrity
 
-The final indexes should be determined during implementation after reviewing the application's actual queries.
+MongoDB does not provide relational foreign-key enforcement in the same way as a SQL database.
 
----
-
-# 52. Database Validation
-
-Important application/database values must satisfy appropriate constraints.
+Therefore the NestJS backend must validate referenced IDs.
 
 Examples:
 
-```text
-piecesPerBox > 0
-areaPerBox > 0
-minimumStock >= 0
-payment amount > 0
-order quantity > 0
-physical inventory quantity >= 0
-```
+order.customerId → existing customer
+order.items[].productId → existing product
+payment.orderId → existing order
+payment.customerId → same customer as order
+inventory.productId → existing product
+inventory_transaction.productId → existing product
 
-The backend must validate external input before writing to MongoDB.
+Business operations that create multiple references must validate them before commit.
 
----
+48. Deletion Policy
 
-# 53. Security
-
-MongoDB credentials must remain exclusively on the backend.
-
-The frontend must never receive:
-
-```text
-MongoDB URI
-Database username
-Database password
-Database credentials
-```
-
-Production database access must use appropriate credentials and least-privilege principles.
-
-MongoDB Atlas network/access controls should be configured appropriately for production.
-
----
-
-# 54. Source of Truth
-
-The following collections are authoritative for their respective domains:
-
-```text
-users
-    ↓
-Authentication users
-
-products
-    ↓
-Product definitions
-
-inventory_transactions
-    ↓
-Inventory movement history
-
-customers
-    ↓
-Customer information
+The following are business history and must not be casually hard-deleted:
 
 orders
-    ↓
-Orders and historical transaction information
+payments
+inventory_transactions
+
+Products should normally be deactivated:
+
+isActive = false
+
+Customers should normally be deactivated if historical relationships exist.
+
+Hard deletion of historical data requires an explicit business and architectural decision.
+
+49. Security Requirements
+
+Database access must be server-side only.
+
+Never expose to the browser:
+
+MongoDB URI
+MongoDB username
+MongoDB password
+Database credentials
+
+Production access must follow least privilege.
+
+MongoDB Atlas network access, database users, credentials, backups and monitoring must be configured as production infrastructure rather than committed to source control.
+
+Secrets must live in environment/secret-management infrastructure, not in Git.
+
+50. Backend Authority
+
+The backend is the final authority for:
+
+Authentication
+Authorization
+Product validation
+Inventory availability
+Unit conversion
+Square-foot validation
+Order totals
+Payment validation
+Outstanding calculations
+Cancellation
+Inventory restoration
+
+The frontend may perform early validation for usability, but backend validation is mandatory.
+
+51. Transactional Business Examples
+
+Example A — Complete Box Sale
+
+Product:
+4 pieces/box
+
+Inventory:
+10 complete boxes
+= 40 pieces
+
+Sale:
+3 boxes
+
+Physical consumption:
+12 pieces
+
+Remaining:
+28 pieces
+= 7 complete boxes
+
+Example B — Piece Sale
+
+Inventory:
+9 boxes + 1 loose
+= 37 pieces
+
+Sale:
+3 pieces
+
+Remaining:
+34 pieces
+= 8 boxes + 2 loose
+
+Example C — Square-Foot Sale
+
+4 pieces/box
+8 sq.ft/box
+
+1 piece = 2 sq.ft
+
+Sale:
+6 sq.ft
+
+Physical consumption:
+3 pieces
+
+Example D — Partial Payment
+
+Order:
+₹45,000
+
+Payment 1:
+₹20,000
+
+Outstanding:
+₹25,000
+
+Example E — Cancellation
+
+Sale:
+-6 pieces
+
+Cancellation:
++6 pieces via SALE_REVERSAL
+
+52. Data Integrity Rules
+
+The system must reject invalid states including:
+
+negative inventory
+fractional physical pieces
+zero/negative piecesPerBox
+zero/negative areaPerBox
+negative money
+zero/negative payment
+payment greater than remaining order balance
+invalid square-foot conversion
+sale above available stock
+BOX sale without enough complete boxes
+payment linked to another customer's order
+repeated cancellation/reversal
+unauthorized database mutation
+
+Business validation belongs in backend domain/application logic and appropriate schema validation.
+
+53. Source of Truth Matrix
+
+Data
+
+Source of truth
+
+User authentication
+
+users
+
+Product definition
+
+products
+
+Current physical stock
+
+inventories.totalPieces
+
+Inventory history
+
+inventory_transactions
+
+Customer information
+
+customers
+
+Historical sales
+
+orders
+
+Payment history
 
 payments
-    ↓
-Payment history
-```
 
-Derived information such as:
+Order outstanding
 
-```text
-Current Inventory
-Outstanding Amount
-Sales Reports
-Dashboard Statistics
-```
+Derived from order + valid payments
 
-should be calculated from authoritative records or maintained through carefully controlled derived-state mechanisms.
+Customer outstanding
 
----
+Derived from valid orders + payments
 
-# 55. Schema Evolution
+Full boxes
 
-Database/model changes must be documented.
+Derived from inventory + product measurement
 
-The AI agent must not make destructive schema changes without explicit approval.
+Loose pieces
 
-Before making an architectural database change, the agent must:
+Derived from inventory + product measurement
 
-1. Explain the proposed change.
-2. Explain why it is needed.
-3. Identify affected collections.
-4. Identify affected backend modules.
-5. Identify data/migration risks.
-6. Explain security implications.
-7. Wait for approval when the change is destructive or architectural.
+Total sq.ft
+
+Derived from inventory + product measurement
+
+Sales reports
+
+Derived from authoritative order data
+
+54. Schema Evolution
+
+Database schema changes must be controlled.
+
+The AI agent must NOT silently change the production data model.
+
+For any architectural or destructive schema change, the agent must:
+
+Explain the proposed change.
+
+Explain why it is needed.
+
+Identify affected collections.
+
+Identify affected modules/API contracts.
+
+Identify migration/data risks.
+
+Identify historical-data implications.
+
+Identify security implications.
+
+Update DECISIONS.md when the architecture changes.
+
+Wait for explicit approval before destructive or architectural changes.
+
+55. Implementation Boundary
+
+This document defines the database/domain contract. It does not itself define every Mongoose decorator or implementation detail.
+
+The implementation must create corresponding Mongoose schemas/models that respect this document.
+
+The next implementation stage should produce:
+
+UserSchema
+ProductSchema
+InventorySchema
+CustomerSchema
+OrderSchema
+PaymentSchema
+InventoryTransactionSchema
+
+along with DTO validation, service-level business rules, indexes, and transaction handling.
+
+The implementation must not introduce a conflicting schema simply because it is easier to code.
+
+56. Final V1 Database Architecture
+
+                           MongoDB Atlas
+                                │
+        ┌───────────────────────┼────────────────────────┐
+        │                       │                        │
+      users                  products                customers
+        │                       │                        │
+        │                       │                        │
+        │                 inventories                   │
+        │                       │                        │
+        │                       ▼                        │
+        │            inventory_transactions             │
+        │                       ▲                        │
+        │                       │                        │
+        │                    orders ◄───────────────────┘
+        │                       │
+        │                       ▼
+        │                    payments
+        │
+        └── authentication
+
+Core invariant
+
+Current physical inventory
+        =
+Inventory.totalPieces
+
+and:
+
+Order
+  → historical sale
+
+Payment
+  → financial transaction
+
+Inventory Transaction
+  → physical stock movement
+
+These boundaries must remain clear throughout implementation.
