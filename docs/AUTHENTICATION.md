@@ -10,6 +10,25 @@ Staff accounts are not part of V1.
 
 ---
 
+# User Provisioning (Owner Account)
+
+There is NO public registration or signup endpoint in V1.
+
+The owner account is created or updated exclusively via a dedicated NestJS CLI seed command:
+
+```bash
+npm run seed:admin
+```
+
+This command:
+1. Reads `ADMIN_EMAIL` and `ADMIN_PASSWORD` from environment variables.
+2. Validates email format and password strength.
+3. Generates a secure salted hash using `bcrypt`.
+4. Creates or updates the `users` document with `role: 'OWNER'` and `isActive: true`.
+5. Never exposes or stores the plaintext password.
+
+---
+
 # Login
 
 The owner provides:
