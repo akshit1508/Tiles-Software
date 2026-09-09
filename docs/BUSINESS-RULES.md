@@ -88,6 +88,39 @@ An order belongs to one customer.
 
 Orders can be fully paid, partially paid, or unpaid/credit.
 
+### Order Status
+In V1, there are strictly two allowed order statuses:
+- `COMPLETED`: Sale is confirmed and physical inventory is deducted.
+- `CANCELLED`: Sale is cancelled and physical inventory is restored via `SALE_REVERSAL`.
+
+There is NO `DRAFT` status in V1.
+
+### Order Numbers
+Every order receives an identifier formatted as:
+`GT-YYYYMMDD-XXXX` (e.g. `GT-20260909-0001`).
+Order numbers are generated using an atomic MongoDB counter mechanism to prevent race conditions or duplicate sequence numbers during concurrent order creation.
+
+---
+
+# Product Deactivation
+
+Products must never be hard-deleted once created.
+
+Deactivation must operate as a soft deactivation:
+`isActive = false`
+
+Physical deletion of products that have historical references (inventory, transactions, or orders) is strictly forbidden to preserve business history.
+
+---
+
+# User Provisioning
+
+The single owner account in V1 is provisioned exclusively through a dedicated CLI seed command:
+`npm run seed:admin`
+
+This command reads `ADMIN_EMAIL` and `ADMIN_PASSWORD` from environment variables and creates or updates the owner account with a securely hashed password.
+There is NO public registration or signup endpoint in V1.
+
 ---
 
 # Payments

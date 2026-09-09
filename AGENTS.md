@@ -65,6 +65,8 @@ There are no customer accounts in V1.
 
 Customers do not log in.
 
+There is NO public registration or signup endpoint in V1. Initial owner account provisioning is handled via `npm run seed:admin` using environment variables.
+
 The application is internet-based and must work responsively on:
 
 - Desktop
@@ -107,6 +109,8 @@ Products contain:
 - Images
 
 Current inventory quantity must be handled through the inventory system rather than treating it as ordinary product metadata.
+
+Products must never be physically hard-deleted once created. Deletion operations must perform soft deactivation (`isActive = false`) to preserve historical consistency.
 
 ---
 
@@ -168,8 +172,17 @@ Orders may be:
 - Partially paid
 - Credit / outstanding
 
+Order statuses in V1 are strictly:
+- `COMPLETED`
+- `CANCELLED`
+
+There is NO `DRAFT` status in V1.
+
+Order numbers must follow the format `GT-YYYYMMDD-XXXX` and be generated atomically using a dedicated MongoDB counter document.
+
 Order information should include:
 
+- Order Number
 - Customer
 - Products
 - Quantities

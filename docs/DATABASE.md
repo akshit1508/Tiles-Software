@@ -224,15 +224,15 @@ minimumStockPieces >= 0
 
 Product deactivation
 
-Products must not be casually hard-deleted when historical orders or inventory transactions reference them.
+Products must never be hard-deleted once created.
 
-Use:
+Deactivation must operate as a soft deactivation:
 
 isActive = false
 
-for normal product removal from active operations.
+Physical deletion of products that have historical references (inventory, transactions, or orders) is strictly forbidden to preserve business history. API endpoints for deletion (e.g. DELETE /products/:id) must strictly perform soft deactivation (setting isActive = false).
 
-Historical orders must continue to work after product deactivation.
+Historical orders and transactions must continue to work after product deactivation.
 
 7. Product Measurement Model
 
@@ -568,19 +568,21 @@ Fields
 
 Order
 ├── _id: ObjectId
-├── orderNumber: string
+├── orderNumber: string (Format: GT-YYYYMMDD-XXXX, unique, generated via atomic counter)
 ├── customerId: ObjectId
 ├── items: OrderItem[]
 ├── subtotal: Decimal128
 ├── totalAmount: Decimal128
-├── status: enum
+├── status: COMPLETED | CANCELLED
 ├── createdAt: Date
 ├── updatedAt: Date
 └── createdBy: ObjectId
 
-The final order-status enum must be documented consistently in API.md and BUSINESS-RULES.md.
+In V1, the order status enum contains strictly two values:
+- COMPLETED
+- CANCELLED
 
-At minimum, the implementation must distinguish a valid completed sale from a cancelled order.
+Order numbers follow the format: GT-YYYYMMDD-XXXX. They must be generated atomically using a MongoDB counter document (via findOneAndUpdate) to eliminate any possibility of duplicate order numbers under concurrency.
 
 20. Order Product Snapshot
 
@@ -1008,18 +1010,18 @@ Historical order snapshots must remain unchanged.
 
 43. Order Status and Financial/Inventory Semantics
 
-The final order status enum must be consistent across:
+The order status enum is locked and consistent across:
 
 BUSINESS-RULES.md
 API.md
 DATABASE.md
 
-At minimum, the implementation needs a state representing:
+In V1, the only permitted order statuses are:
 
-completed/valid sale
-cancelled sale
+1. COMPLETED: represents a valid completed sale where physical inventory has been deducted.
+2. CANCELLED: represents a cancelled sale where physical inventory has been restored via SALE_REVERSAL.
 
-A draft state may be introduced if the UI requires an order-building workflow, but a draft must not reduce inventory or count as a completed sale.
+There is NO DRAFT state in V1. An order is persisted upon completion of the transaction.
 
 44. Reports and Dashboard
 

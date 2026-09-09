@@ -8,11 +8,22 @@ Production traffic must use HTTPS/TLS.
 
 # Authentication
 
-- Hash passwords securely.
+- Hash passwords securely with bcrypt.
 - Never store plaintext passwords.
-- Protect authentication credentials.
-- Implement logout.
-- Rate-limit authentication endpoints.
+- No public user registration or signup endpoint in V1.
+- Initial owner account provisioned exclusively via CLI seed command (`npm run seed:admin`) reading environment variables.
+- Protect authentication credentials using secure, HttpOnly, SameSite cookies.
+- Implement logout and session invalidation.
+- Rate-limit authentication endpoints to prevent brute-force attacks.
+
+---
+
+# Concurrency & Data Integrity
+
+- Atomic order creation: Order creation, stock verification, and stock deduction must execute in an atomic transaction to prevent race conditions or overselling.
+- Atomic order numbering: Order numbers (`GT-YYYYMMDD-XXXX`) must be generated using an atomic MongoDB counter (`findOneAndUpdate`) so concurrent requests cannot generate duplicate numbers.
+- Cancellation idempotency: Cancellation must be atomic and idempotent, preventing multiple stock reversals for the same order.
+- Business history preservation: Orders, payments, and inventory transactions must never be hard-deleted. Products must use soft deactivation (`isActive: false`).
 
 ---
 

@@ -58,11 +58,24 @@ Test:
 - Multiple payments
 - Outstanding balance
 
-## Security
+## Security & System Integrity
 
 Test:
 
 - Unauthenticated API access
 - Unauthorized access
-- Invalid input
-- Authentication abuse/rate limiting
+- Invalid input validation
+- Authentication abuse / rate limiting
+- Owner seed script execution (`npm run seed:admin`)
+- Prevention of public registration/signup
+
+## Orders & Concurrency
+
+Test:
+
+- Atomic order number generation under concurrent requests (no duplicate `GT-YYYYMMDD-XXXX`)
+- Strict order status transitions (only `COMPLETED` permitted on create, only `CANCELLED` on cancellation)
+- Rejection of invalid status transitions (e.g. `DRAFT` or re-activating `CANCELLED`)
+- Order cancellation command (`POST /orders/:id/cancel`) idempotency (cancelling twice does not duplicate stock restoration)
+- Exact stock restoration via `SALE_REVERSAL` transaction
+- Product soft-deactivation (`DELETE /products/:id` sets `isActive: false` and preserves historical orders/movements)

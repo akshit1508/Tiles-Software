@@ -128,3 +128,91 @@ Decision:
 V1 does not contain customer-specific pricing tiers.
 
 Applicable transaction amount is recorded at order time.
+
+---
+
+## ADR-011 — Order Statuses in V1
+
+Status: Accepted
+
+Decision:
+
+In V1, order statuses are strictly limited to:
+- `COMPLETED`
+- `CANCELLED`
+
+No `DRAFT` or intermediate order status is permitted. An order is created directly in `COMPLETED` status upon completing a sale.
+
+Reason:
+
+Simplifies business logic and aligns with the single-operator counter workflow where orders are finalized at transaction time.
+
+---
+
+## ADR-012 — Product Soft Deactivation
+
+Status: Accepted
+
+Decision:
+
+Products must never be physically hard-deleted from the database once created. Any deletion request (including `DELETE /products/:id`) must operate as a soft deactivation:
+`isActive = false`
+
+Reason:
+
+Preserves audit integrity and historical consistency across existing orders, payments, and inventory transactions.
+
+---
+
+## ADR-013 — Atomic Order Number Generation
+
+Status: Accepted
+
+Decision:
+
+Order numbers must follow the format `GT-YYYYMMDD-XXXX` and be generated atomically using a dedicated MongoDB counter document (via `findOneAndUpdate` with `$inc`).
+
+Reason:
+
+Guarantees sequential, gap-free, and collision-proof order numbering even under concurrent order creation requests.
+
+---
+
+## ADR-014 — Initial Owner Account Provisioning
+
+Status: Accepted
+
+Decision:
+
+The single owner account in V1 will be provisioned exclusively via a dedicated NestJS CLI seed command:
+`npm run seed:admin`
+reading `ADMIN_EMAIL` and `ADMIN_PASSWORD` from environment variables. There is no public registration or signup endpoint in V1.
+
+Reason:
+
+Enforces strict access control for the private single-shop application and prevents unauthorized registration attempts.
+
+---
+
+## ADR-015 — Dedicated Order Cancellation Command Endpoint
+
+Status: Accepted
+
+Decision:
+
+Order cancellation is executed via a dedicated business command endpoint:
+`POST /orders/:id/cancel`
+Generic order updates via `PATCH /orders/:id` are not supported.
+
+The atomic cancellation flow:
+1. Verify order is currently `COMPLETED`.
+2. Restore exact consumed `physicalPieces` to `inventories`.
+3. Create `SALE_REVERSAL` inventory transaction.
+4. Update status to `CANCELLED`.
+5. Commit atomically.
+
+Cancellation is strictly idempotent: a second cancellation attempt will not restore inventory again.
+
+Reason:
+
+Treats cancellation as an explicit domain business action rather than generic resource modification, ensuring rigorous transactional and stock restoration guarantees.
