@@ -54,6 +54,10 @@ export class Counter {
     required: true,
     default: 0,
     min: 0,
+    validate: {
+      validator: Number.isInteger,
+      message: 'seq must be a non-negative integer',
+    },
   })
   seq: number;
 }

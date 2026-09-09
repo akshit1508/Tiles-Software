@@ -9,6 +9,7 @@
  * Tests do NOT require a running MongoDB instance.
  */
 
+import { Types } from 'mongoose';
 import {
   UserRole,
   SalesUnit,
@@ -132,6 +133,31 @@ describe('ProductSchema', () => {
     for (const field of ['areaPerBox', 'purchasePrice', 'sellingPrice']) {
       expect(ProductSchema.path(field).instance).toBe('Decimal128');
     }
+  });
+
+  it('enforces areaPerBox > 0 via validator', () => {
+    const opts = pathOptions(ProductSchema, 'areaPerBox');
+    const validator = (opts.validate as { validator: (v: Types.Decimal128) => boolean }).validator;
+    expect(validator(Types.Decimal128.fromString('10.5'))).toBe(true);
+    expect(validator(Types.Decimal128.fromString('0.01'))).toBe(true);
+    expect(validator(Types.Decimal128.fromString('0'))).toBe(false);
+    expect(validator(Types.Decimal128.fromString('-1'))).toBe(false);
+  });
+
+  it('enforces purchasePrice >= 0 via validator', () => {
+    const opts = pathOptions(ProductSchema, 'purchasePrice');
+    const validator = (opts.validate as { validator: (v: Types.Decimal128) => boolean }).validator;
+    expect(validator(Types.Decimal128.fromString('100'))).toBe(true);
+    expect(validator(Types.Decimal128.fromString('0'))).toBe(true);
+    expect(validator(Types.Decimal128.fromString('-5'))).toBe(false);
+  });
+
+  it('enforces sellingPrice >= 0 via validator', () => {
+    const opts = pathOptions(ProductSchema, 'sellingPrice');
+    const validator = (opts.validate as { validator: (v: Types.Decimal128) => boolean }).validator;
+    expect(validator(Types.Decimal128.fromString('150'))).toBe(true);
+    expect(validator(Types.Decimal128.fromString('0'))).toBe(true);
+    expect(validator(Types.Decimal128.fromString('-10'))).toBe(false);
   });
 
   it('has isActive as Boolean', () => {
@@ -273,6 +299,16 @@ describe('CounterSchema', () => {
     expect(CounterSchema.path('seq').instance).toBe('Number');
   });
 
+  it('enforces seq as a non-negative integer via validator', () => {
+    const opts = pathOptions(CounterSchema, 'seq');
+    expect(opts.min).toBe(0);
+    const validator = (opts.validate as { validator: (v: number) => boolean }).validator;
+    expect(validator(0)).toBe(true);
+    expect(validator(1)).toBe(true);
+    expect(validator(100)).toBe(true);
+    expect(validator(1.5)).toBe(false);
+  });
+
   it('does NOT have timestamps', () => {
     const opts = (CounterSchema as unknown as { options: Record<string, unknown> }).options;
     expect(opts['timestamps']).toBe(false);
@@ -296,6 +332,15 @@ describe('PaymentSchema', () => {
 
   it('has amount as Decimal128', () => {
     expect(PaymentSchema.path('amount').instance).toBe('Decimal128');
+  });
+
+  it('enforces amount > 0 via validator', () => {
+    const opts = pathOptions(PaymentSchema, 'amount');
+    const validator = (opts.validate as { validator: (v: Types.Decimal128) => boolean }).validator;
+    expect(validator(Types.Decimal128.fromString('500'))).toBe(true);
+    expect(validator(Types.Decimal128.fromString('0.01'))).toBe(true);
+    expect(validator(Types.Decimal128.fromString('0'))).toBe(false);
+    expect(validator(Types.Decimal128.fromString('-50'))).toBe(false);
   });
 
   it('has paymentMethod enum with all four methods', () => {

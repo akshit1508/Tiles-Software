@@ -65,6 +65,10 @@ export class Payment {
   @Prop({
     type: MongooseSchema.Types.Decimal128,
     required: true,
+    validate: {
+      validator: (v: Types.Decimal128) => v != null && parseFloat(v.toString()) > 0,
+      message: 'amount must be greater than 0',
+    },
   })
   amount: Types.Decimal128;
 

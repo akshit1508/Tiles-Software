@@ -69,6 +69,10 @@ export class Product {
   @Prop({
     type: MongooseSchema.Types.Decimal128,
     required: true,
+    validate: {
+      validator: (v: Types.Decimal128) => v != null && parseFloat(v.toString()) > 0,
+      message: 'areaPerBox must be greater than 0',
+    },
   })
   areaPerBox: Types.Decimal128;
 
@@ -80,6 +84,10 @@ export class Product {
   @Prop({
     type: MongooseSchema.Types.Decimal128,
     required: true,
+    validate: {
+      validator: (v: Types.Decimal128) => v != null && parseFloat(v.toString()) >= 0,
+      message: 'purchasePrice must be greater than or equal to 0',
+    },
   })
   purchasePrice: Types.Decimal128;
 
@@ -92,6 +100,10 @@ export class Product {
   @Prop({
     type: MongooseSchema.Types.Decimal128,
     required: true,
+    validate: {
+      validator: (v: Types.Decimal128) => v != null && parseFloat(v.toString()) >= 0,
+      message: 'sellingPrice must be greater than or equal to 0',
+    },
   })
   sellingPrice: Types.Decimal128;
 
