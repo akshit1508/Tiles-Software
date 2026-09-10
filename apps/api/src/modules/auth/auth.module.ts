@@ -9,6 +9,7 @@ import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { LoginThrottlerGuard } from './guards/login-throttler.guard';
+import { RolesGuard } from './guards/roles.guard';
 
 @Module({
   imports: [
@@ -28,7 +29,7 @@ import { LoginThrottlerGuard } from './guards/login-throttler.guard';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, JwtAuthGuard, LoginThrottlerGuard],
-  exports: [AuthService, JwtAuthGuard, LoginThrottlerGuard, PassportModule, JwtModule],
+  providers: [AuthService, JwtStrategy, JwtAuthGuard, LoginThrottlerGuard, RolesGuard],
+  exports: [AuthService, JwtAuthGuard, LoginThrottlerGuard, RolesGuard, PassportModule, JwtModule],
 })
 export class AuthModule {}

@@ -29,15 +29,21 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  ForbiddenException,
+  ExecutionContext,
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
+import { Reflector } from '@nestjs/core';
 import { Types } from 'mongoose';
 import { ProductsService } from './products.service';
 import { ProductsController } from './products.controller';
 import { Product } from './schemas/product.schema';
 import { Inventory } from '../inventory/schemas/inventory.schema';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { ROLES_KEY } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../../common/enums';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -116,6 +122,8 @@ describe('Products Module Unit Tests', () => {
       ],
     })
       .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(RolesGuard)
       .useValue({ canActivate: () => true })
       .compile();
 
@@ -454,5 +462,123 @@ describe('Products Module Unit Tests', () => {
     const result = await controller.activate(id);
     expect(result).toEqual({ product: mockProduct });
     expect(service.activate).toHaveBeenCalledWith(id);
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Role-based Authorization Tests
+  // ───────────────────────────────────────────────────────────────────────────
+  describe('Role-based Authorization', () => {
+    let reflector: Reflector;
+    let rolesGuard: RolesGuard;
+
+    beforeEach(() => {
+      reflector = new Reflector();
+      rolesGuard = new RolesGuard(reflector);
+    });
+
+    it('24. RolesGuard is applied to ProductsController alongside JwtAuthGuard', () => {
+      const guards = Reflect.getMetadata('__guards__', ProductsController);
+      expect(guards).toBeDefined();
+      const hasRolesGuard = guards.some(
+        (g: unknown) => g === RolesGuard || (typeof g === 'function' && g.name === 'RolesGuard'),
+      );
+      const hasJwtGuard = guards.some(
+        (g: unknown) => g === JwtAuthGuard || (typeof g === 'function' && g.name === 'JwtAuthGuard'),
+      );
+      expect(hasRolesGuard).toBe(true);
+      expect(hasJwtGuard).toBe(true);
+    });
+
+    it('25. @Roles(UserRole.OWNER) is attached to all mutation endpoints', () => {
+      const createRoles = Reflect.getMetadata(ROLES_KEY, ProductsController.prototype.create);
+      const updateRoles = Reflect.getMetadata(ROLES_KEY, ProductsController.prototype.update);
+      const activateRoles = Reflect.getMetadata(ROLES_KEY, ProductsController.prototype.activate);
+      const deactivateRoles = Reflect.getMetadata(ROLES_KEY, ProductsController.prototype.deactivate);
+
+      expect(createRoles).toEqual([UserRole.OWNER]);
+      expect(updateRoles).toEqual([UserRole.OWNER]);
+      expect(activateRoles).toEqual([UserRole.OWNER]);
+      expect(deactivateRoles).toEqual([UserRole.OWNER]);
+    });
+
+    it('26. GET endpoints do NOT have @Roles decorator (allowing any authenticated user)', () => {
+      const findAllRoles = Reflect.getMetadata(ROLES_KEY, ProductsController.prototype.findAll);
+      const findOneRoles = Reflect.getMetadata(ROLES_KEY, ProductsController.prototype.findOne);
+
+      expect(findAllRoles).toBeUndefined();
+      expect(findOneRoles).toBeUndefined();
+    });
+
+    it('27. RolesGuard permits access when no roles are required on route', () => {
+      const context = {
+        getHandler: () => ProductsController.prototype.findAll,
+        getClass: () => ProductsController,
+        switchToHttp: () => ({
+          getRequest: () => ({ user: { role: 'ANY_ROLE' } }),
+        }),
+      } as unknown as ExecutionContext;
+
+      expect(rolesGuard.canActivate(context)).toBe(true);
+    });
+
+    it('28. RolesGuard permits access when user has the authorized OWNER role', () => {
+      const context = {
+        getHandler: () => ProductsController.prototype.create,
+        getClass: () => ProductsController,
+        switchToHttp: () => ({
+          getRequest: () => ({ user: { role: UserRole.OWNER } }),
+        }),
+      } as unknown as ExecutionContext;
+
+      expect(rolesGuard.canActivate(context)).toBe(true);
+    });
+
+    it('29. RolesGuard blocks request with ForbiddenException when user has unauthorized role', () => {
+      const context = {
+        getHandler: () => ProductsController.prototype.create,
+        getClass: () => ProductsController,
+        switchToHttp: () => ({
+          getRequest: () => ({ user: { role: 'STAFF' } }),
+        }),
+      } as unknown as ExecutionContext;
+
+      expect(() => rolesGuard.canActivate(context)).toThrow(ForbiddenException);
+    });
+
+    it('30. RolesGuard blocks request with ForbiddenException when user has no role', () => {
+      const context = {
+        getHandler: () => ProductsController.prototype.create,
+        getClass: () => ProductsController,
+        switchToHttp: () => ({
+          getRequest: () => ({ user: {} }),
+        }),
+      } as unknown as ExecutionContext;
+
+      expect(() => rolesGuard.canActivate(context)).toThrow(ForbiddenException);
+    });
+
+    it('31. RolesGuard blocks request with ForbiddenException when user is undefined', () => {
+      const context = {
+        getHandler: () => ProductsController.prototype.create,
+        getClass: () => ProductsController,
+        switchToHttp: () => ({
+          getRequest: () => ({}),
+        }),
+      } as unknown as ExecutionContext;
+
+      expect(() => rolesGuard.canActivate(context)).toThrow(ForbiddenException);
+    });
+
+    it('32. JwtAuthGuard blocks unauthenticated requests', () => {
+      const jwtGuard = new JwtAuthGuard();
+      expect(() => jwtGuard.handleRequest(null, null)).toThrow();
+      expect(() => jwtGuard.handleRequest(new Error('Invalid token'), null)).toThrow();
+    });
+
+    it('33. JwtAuthGuard permits authenticated user', () => {
+      const jwtGuard = new JwtAuthGuard();
+      const mockUser = { id: '123', role: UserRole.OWNER };
+      expect(jwtGuard.handleRequest(null, mockUser)).toEqual(mockUser);
+    });
   });
 });
