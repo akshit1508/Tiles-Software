@@ -91,9 +91,10 @@ export class OrdersService {
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Atomically validates stock, calculates authoritative totals, decrements stock,
-   * records SALE inventory transactions, generates order number via Counter,
-   * and creates the Order document in COMPLETED status.
+   * Atomically validates customer/product active state, stock availability,
+   * authoritative totals, decrements stock, records SALE transactions,
+   * generates order number, and creates the Order in COMPLETED status
+   * within a single MongoDB transaction.
    */
   async create(
     dto: CreateOrderDto,
@@ -102,285 +103,303 @@ export class OrdersService {
     const customerObjectId = this.validateObjectId(dto.customerId, 'customerId');
     const userObjectId = this.validateObjectId(userId, 'userId');
 
-    // 1. Validate Customer
-    const customer = await this.customerModel.findById(customerObjectId).exec();
-    if (!customer) {
-      throw new NotFoundException(
-        `Customer with id ${dto.customerId} not found`,
-      );
-    }
-    if (!customer.isActive) {
-      throw new BadRequestException(
-        'Cannot create an order for a deactivated customer',
-      );
-    }
-
     if (!dto.items || dto.items.length === 0) {
       throw new BadRequestException('An order must contain at least one item');
     }
 
-    // 2. Validate and prepare each order item
-    const preparedItems: PreparedOrderItem[] = [];
     const productIds = dto.items.map((item) =>
       this.validateObjectId(item.productId, 'productId'),
     );
 
-    const products = await this.productModel
-      .find({ _id: { $in: productIds } })
-      .exec();
-    const productMap = new Map<string, ProductDocument>();
-    for (const p of products) {
-      productMap.set(p._id.toString(), p);
-    }
-
-    // Fetch existing inventories for all products in this order
-    const inventories = await this.inventoryModel
-      .find({ productId: { $in: productIds } })
-      .exec();
-    const inventoryMap = new Map<string, InventoryDocument>();
-    for (const inv of inventories) {
-      inventoryMap.set(inv.productId.toString(), inv);
-    }
-
-    // Track total physical pieces and box requirements per product across all line items
-    const requiredPiecesByProduct = new Map<string, number>();
-    const requiredBoxesByProduct = new Map<string, number>();
-
-    for (const item of dto.items) {
-      const prodIdStr = item.productId;
-      const product = productMap.get(prodIdStr);
-      if (!product) {
-        throw new NotFoundException(
-          `Product with id ${item.productId} not found`,
-        );
-      }
-      if (!product.isActive) {
-        throw new BadRequestException(
-          `Product "${product.productName}" is deactivated and cannot be sold`,
-        );
-      }
-
-      const piecesPerBox = product.piecesPerBox;
-      const areaPerBox = parseFloat(product.areaPerBox.toString());
-      let physicalPieces: number;
-
-      // Unit and piece validation according to salesUnit
-      switch (item.salesUnit) {
-        case SalesUnit.BOX: {
-          if (!Number.isInteger(item.salesQuantity) || item.salesQuantity <= 0) {
-            throw new BadRequestException(
-              `salesQuantity for BOX sales must be a positive integer, received: ${item.salesQuantity}`,
-            );
-          }
-          physicalPieces = item.salesQuantity * piecesPerBox;
-          const currentBoxes = requiredBoxesByProduct.get(prodIdStr) ?? 0;
-          requiredBoxesByProduct.set(prodIdStr, currentBoxes + item.salesQuantity);
-          break;
-        }
-
-        case SalesUnit.PIECE: {
-          if (!Number.isInteger(item.salesQuantity) || item.salesQuantity <= 0) {
-            throw new BadRequestException(
-              `salesQuantity for PIECE sales must be a positive integer, received: ${item.salesQuantity}`,
-            );
-          }
-          physicalPieces = item.salesQuantity;
-          break;
-        }
-
-        case SalesUnit.SQ_FT: {
-          if (item.salesQuantity <= 0) {
-            throw new BadRequestException(
-              `salesQuantity for SQ_FT sales must be positive, received: ${item.salesQuantity}`,
-            );
-          }
-          const areaPerPiece = areaPerBox / piecesPerBox;
-          const pieces = item.salesQuantity / areaPerPiece;
-          const roundedPieces = Math.round(pieces);
-
-          // Validation tolerance for tiles (cannot cut tiles)
-          if (Math.abs(pieces - roundedPieces) > 1e-4) {
-            throw new BadRequestException(
-              `Requested ${item.salesQuantity} sq.ft does not correspond to a whole number of tiles. Each tile is ${areaPerPiece} sq.ft.`,
-            );
-          }
-          physicalPieces = roundedPieces;
-          break;
-        }
-
-        default:
-          throw new BadRequestException(`Unsupported sales unit: ${item.salesUnit}`);
-      }
-
-      // Authoritative Unit Price:
-      // If client supplied unitPrice, OWNER authorized custom price is used;
-      // otherwise, backend derives it authoritatively from Product.sellingPrice.
-      let unitPrice: number;
-      const sellingPriceBox = parseFloat(product.sellingPrice.toString());
-
-      if (item.unitPrice !== undefined && item.unitPrice !== null) {
-        if (item.unitPrice < 0) {
-          throw new BadRequestException('unitPrice cannot be negative');
-        }
-        unitPrice = paiseToRupees(Math.round(item.unitPrice * 100));
-      } else {
-        // Authoritative derivation from product.sellingPrice
-        switch (item.salesUnit) {
-          case SalesUnit.BOX:
-            unitPrice = paiseToRupees(Math.round(sellingPriceBox * 100));
-            break;
-          case SalesUnit.PIECE:
-            unitPrice = paiseToRupees(
-              Math.round((sellingPriceBox / piecesPerBox) * 100),
-            );
-            break;
-          case SalesUnit.SQ_FT:
-            unitPrice = paiseToRupees(
-              Math.round((sellingPriceBox / areaPerBox) * 100),
-            );
-            break;
-        }
-      }
-
-      const unitPricePaise = Math.round(unitPrice * 100);
-      const lineTotalPaise = Math.round(item.salesQuantity * unitPricePaise);
-      const lineTotal = paiseToRupees(lineTotalPaise);
-
-      preparedItems.push({
-        productId: product._id,
-        productNameSnapshot: product.productName,
-        brandSnapshot: product.brand,
-        salesQuantity: item.salesQuantity,
-        salesUnit: item.salesUnit,
-        physicalPieces,
-        unitPrice,
-        unitPricePaise,
-        lineTotal,
-        lineTotalPaise,
-        piecesPerBox,
-        areaPerBox,
-      });
-
-      const currentTotalPieces = requiredPiecesByProduct.get(prodIdStr) ?? 0;
-      requiredPiecesByProduct.set(prodIdStr, currentTotalPieces + physicalPieces);
-    }
-
-    // 3. Stock Availability Pre-check
-    for (const [prodIdStr, reqPieces] of requiredPiecesByProduct.entries()) {
-      const inv = inventoryMap.get(prodIdStr);
-      const product = productMap.get(prodIdStr)!;
-      const availablePieces = inv ? inv.totalPieces : 0;
-
-      if (availablePieces < reqPieces) {
-        throw new BadRequestException(
-          `Insufficient stock for product "${product.productName}". Requested ${reqPieces} pieces, but only ${availablePieces} pieces available`,
-        );
-      }
-
-      // Check complete box availability for BOX sales (DATABASE.md Section 13)
-      const reqBoxes = requiredBoxesByProduct.get(prodIdStr) ?? 0;
-      if (reqBoxes > 0) {
-        const fullBoxesAvailable = Math.floor(
-          availablePieces / product.piecesPerBox,
-        );
-        if (reqBoxes > fullBoxesAvailable) {
-          const loosePieces = availablePieces % product.piecesPerBox;
-          throw new BadRequestException(
-            `Insufficient complete boxes for product "${product.productName}". Requested ${reqBoxes} boxes, but only ${fullBoxesAvailable} complete boxes available (${loosePieces} loose pieces cannot be used for box sale)`,
-          );
-        }
-      }
-    }
-
-    // 4. Calculate Order Subtotal and Total Amount (authoritative paise precision)
-    const subtotalPaise = preparedItems.reduce(
-      (sum, item) => sum + item.lineTotalPaise,
-      0,
-    );
-    const subtotal = paiseToRupees(subtotalPaise);
-    const totalAmount = subtotal; // In V1 totalAmount equals subtotal
-
-    // 5. Execute Atomic MongoDB Multi-Document Transaction
-    const createdOrder = await this.runInTransaction(async (session) => {
-      // 5a. Generate Atomic Order Number (DECISIONS.md ADR-013)
-      const now = new Date();
-      const yyyy = now.getUTCFullYear().toString();
-      const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
-      const dd = String(now.getUTCDate()).padStart(2, '0');
-      const dateKey = `GT-${yyyy}${mm}${dd}`;
-
-      const counter = await this.counterModel.findOneAndUpdate(
-        { key: dateKey },
-        { $inc: { seq: 1 } },
-        { upsert: true, new: true, session },
-      );
-
-      const seq = String(counter.seq).padStart(4, '0');
-      const orderNumber = `${dateKey}-${seq}`;
-
-      // 5b. Deduct Physical Pieces from Inventories atomically
-      for (const [prodIdStr, reqPieces] of requiredPiecesByProduct.entries()) {
-        const updatedInventory = await this.inventoryModel
-          .findOneAndUpdate(
-            {
-              productId: new Types.ObjectId(prodIdStr),
-              totalPieces: { $gte: reqPieces },
-            },
-            { $inc: { totalPieces: -reqPieces } },
-            { new: true, session },
-          )
+    // Execute authoritative validations and persistence within transaction boundary
+    const { orderDoc, customerDoc } = await this.runInTransaction(
+      async (session) => {
+        // 1. Authoritative Customer Validation within transaction boundary
+        const customer = await this.customerModel
+          .findById(customerObjectId)
+          .session(session)
           .exec();
 
-        if (!updatedInventory) {
-          throw new BadRequestException(
-            'Concurrent inventory update prevented order completion. Please retry.',
+        if (!customer) {
+          throw new NotFoundException(
+            `Customer with id ${dto.customerId} not found`,
           );
         }
-      }
+        if (!customer.isActive) {
+          throw new BadRequestException(
+            'Cannot create an order for a deactivated customer',
+          );
+        }
 
-      // 5c. Build and Persist the Order Document
-      const orderData = {
-        orderNumber,
-        customerId: customer._id,
-        items: preparedItems.map((item) => ({
+        // 2. Authoritative Product Validation within transaction boundary
+        const products = await this.productModel
+          .find({ _id: { $in: productIds } })
+          .session(session)
+          .exec();
+
+        const productMap = new Map<string, ProductDocument>();
+        for (const p of products) {
+          productMap.set(p._id.toString(), p);
+        }
+
+        // 3. Fetch existing inventories within transaction boundary
+        const inventories = await this.inventoryModel
+          .find({ productId: { $in: productIds } })
+          .session(session)
+          .exec();
+
+        const inventoryMap = new Map<string, InventoryDocument>();
+        for (const inv of inventories) {
+          inventoryMap.set(inv.productId.toString(), inv);
+        }
+
+        // 4. Validate items, units, quantities, prices and prepare line items
+        const preparedItems: PreparedOrderItem[] = [];
+        const requiredPiecesByProduct = new Map<string, number>();
+        const requiredBoxesByProduct = new Map<string, number>();
+
+        for (const item of dto.items) {
+          const prodIdStr = item.productId;
+          const product = productMap.get(prodIdStr);
+          if (!product) {
+            throw new NotFoundException(
+              `Product with id ${item.productId} not found`,
+            );
+          }
+          if (!product.isActive) {
+            throw new BadRequestException(
+              `Product "${product.productName}" is deactivated and cannot be sold`,
+            );
+          }
+
+          const piecesPerBox = product.piecesPerBox;
+          const areaPerBox = parseFloat(product.areaPerBox.toString());
+          let physicalPieces: number;
+
+          // Unit and piece validation according to salesUnit
+          switch (item.salesUnit) {
+            case SalesUnit.BOX: {
+              if (!Number.isInteger(item.salesQuantity) || item.salesQuantity <= 0) {
+                throw new BadRequestException(
+                  `salesQuantity for BOX sales must be a positive integer, received: ${item.salesQuantity}`,
+                );
+              }
+              physicalPieces = item.salesQuantity * piecesPerBox;
+              const currentBoxes = requiredBoxesByProduct.get(prodIdStr) ?? 0;
+              requiredBoxesByProduct.set(
+                prodIdStr,
+                currentBoxes + item.salesQuantity,
+              );
+              break;
+            }
+
+            case SalesUnit.PIECE: {
+              if (!Number.isInteger(item.salesQuantity) || item.salesQuantity <= 0) {
+                throw new BadRequestException(
+                  `salesQuantity for PIECE sales must be a positive integer, received: ${item.salesQuantity}`,
+                );
+              }
+              physicalPieces = item.salesQuantity;
+              break;
+            }
+
+            case SalesUnit.SQ_FT: {
+              if (item.salesQuantity <= 0) {
+                throw new BadRequestException(
+                  `salesQuantity for SQ_FT sales must be positive, received: ${item.salesQuantity}`,
+                );
+              }
+              const areaPerPiece = areaPerBox / piecesPerBox;
+              const pieces = item.salesQuantity / areaPerPiece;
+              const roundedPieces = Math.round(pieces);
+
+              // Validation tolerance for tiles (cannot cut tiles)
+              if (Math.abs(pieces - roundedPieces) > 1e-4) {
+                throw new BadRequestException(
+                  `Requested ${item.salesQuantity} sq.ft does not correspond to a whole number of tiles. Each tile is ${areaPerPiece} sq.ft.`,
+                );
+              }
+              physicalPieces = roundedPieces;
+              break;
+            }
+
+            default:
+              throw new BadRequestException(
+                `Unsupported sales unit: ${item.salesUnit}`,
+              );
+          }
+
+          // Authoritative Unit Price:
+          // If client supplied unitPrice, OWNER authorized custom price is used;
+          // otherwise, backend derives it authoritatively from Product.sellingPrice.
+          let unitPrice: number;
+          const sellingPriceBox = parseFloat(product.sellingPrice.toString());
+
+          if (item.unitPrice !== undefined && item.unitPrice !== null) {
+            if (item.unitPrice < 0) {
+              throw new BadRequestException('unitPrice cannot be negative');
+            }
+            unitPrice = paiseToRupees(Math.round(item.unitPrice * 100));
+          } else {
+            // Authoritative derivation from product.sellingPrice
+            switch (item.salesUnit) {
+              case SalesUnit.BOX:
+                unitPrice = paiseToRupees(Math.round(sellingPriceBox * 100));
+                break;
+              case SalesUnit.PIECE:
+                unitPrice = paiseToRupees(
+                  Math.round((sellingPriceBox / piecesPerBox) * 100),
+                );
+                break;
+              case SalesUnit.SQ_FT:
+                unitPrice = paiseToRupees(
+                  Math.round((sellingPriceBox / areaPerBox) * 100),
+                );
+                break;
+            }
+          }
+
+          const unitPricePaise = Math.round(unitPrice * 100);
+          const lineTotalPaise = Math.round(item.salesQuantity * unitPricePaise);
+          const lineTotal = paiseToRupees(lineTotalPaise);
+
+          preparedItems.push({
+            productId: product._id,
+            productNameSnapshot: product.productName,
+            brandSnapshot: product.brand,
+            salesQuantity: item.salesQuantity,
+            salesUnit: item.salesUnit,
+            physicalPieces,
+            unitPrice,
+            unitPricePaise,
+            lineTotal,
+            lineTotalPaise,
+            piecesPerBox,
+            areaPerBox,
+          });
+
+          const currentTotalPieces = requiredPiecesByProduct.get(prodIdStr) ?? 0;
+          requiredPiecesByProduct.set(
+            prodIdStr,
+            currentTotalPieces + physicalPieces,
+          );
+        }
+
+        // 5. Stock Availability Pre-check within transaction
+        for (const [prodIdStr, reqPieces] of requiredPiecesByProduct.entries()) {
+          const inv = inventoryMap.get(prodIdStr);
+          const product = productMap.get(prodIdStr)!;
+          const availablePieces = inv ? inv.totalPieces : 0;
+
+          if (availablePieces < reqPieces) {
+            throw new BadRequestException(
+              `Insufficient stock for product "${product.productName}". Requested ${reqPieces} pieces, but only ${availablePieces} pieces available`,
+            );
+          }
+
+          // Check complete box availability for BOX sales (DATABASE.md Section 13)
+          const reqBoxes = requiredBoxesByProduct.get(prodIdStr) ?? 0;
+          if (reqBoxes > 0) {
+            const fullBoxesAvailable = Math.floor(
+              availablePieces / product.piecesPerBox,
+            );
+            if (reqBoxes > fullBoxesAvailable) {
+              const loosePieces = availablePieces % product.piecesPerBox;
+              throw new BadRequestException(
+                `Insufficient complete boxes for product "${product.productName}". Requested ${reqBoxes} boxes, but only ${fullBoxesAvailable} complete boxes available (${loosePieces} loose pieces cannot be used for box sale)`,
+              );
+            }
+          }
+        }
+
+        // 6. Calculate Order Subtotal and Total Amount (authoritative paise precision)
+        const subtotalPaise = preparedItems.reduce(
+          (sum, item) => sum + item.lineTotalPaise,
+          0,
+        );
+        const subtotal = paiseToRupees(subtotalPaise);
+        const totalAmount = subtotal; // In V1 totalAmount equals subtotal
+
+        // 7. Generate Atomic Order Number (DECISIONS.md ADR-013)
+        const now = new Date();
+        const yyyy = now.getUTCFullYear().toString();
+        const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
+        const dd = String(now.getUTCDate()).padStart(2, '0');
+        const dateKey = `GT-${yyyy}${mm}${dd}`;
+
+        const counter = await this.counterModel.findOneAndUpdate(
+          { key: dateKey },
+          { $inc: { seq: 1 } },
+          { upsert: true, new: true, session },
+        );
+
+        const seq = String(counter.seq).padStart(4, '0');
+        const orderNumber = `${dateKey}-${seq}`;
+
+        // 8. Deduct Physical Pieces from Inventories atomically with $gte guard
+        for (const [prodIdStr, reqPieces] of requiredPiecesByProduct.entries()) {
+          const updatedInventory = await this.inventoryModel
+            .findOneAndUpdate(
+              {
+                productId: new Types.ObjectId(prodIdStr),
+                totalPieces: { $gte: reqPieces },
+              },
+              { $inc: { totalPieces: -reqPieces } },
+              { new: true, session },
+            )
+            .exec();
+
+          if (!updatedInventory) {
+            throw new BadRequestException(
+              'Concurrent inventory update prevented order completion. Please retry.',
+            );
+          }
+        }
+
+        // 9. Build and Persist the Order Document
+        const orderData = {
+          orderNumber,
+          customerId: customer._id,
+          items: preparedItems.map((item) => ({
+            productId: item.productId,
+            productNameSnapshot: item.productNameSnapshot,
+            brandSnapshot: item.brandSnapshot,
+            salesQuantity: Types.Decimal128.fromString(
+              String(item.salesQuantity),
+            ),
+            salesUnit: item.salesUnit,
+            physicalPieces: item.physicalPieces,
+            unitPrice: Types.Decimal128.fromString(item.unitPrice.toFixed(2)),
+            lineTotal: Types.Decimal128.fromString(item.lineTotal.toFixed(2)),
+          })),
+          subtotal: Types.Decimal128.fromString(subtotal.toFixed(2)),
+          totalAmount: Types.Decimal128.fromString(totalAmount.toFixed(2)),
+          status: OrderStatus.COMPLETED,
+          createdBy: userObjectId,
+        };
+
+        const [orderDoc] = await this.orderModel.create([orderData], { session });
+
+        // 10. Record SALE inventory transactions for audit trail
+        const transactions = preparedItems.map((item) => ({
           productId: item.productId,
-          productNameSnapshot: item.productNameSnapshot,
-          brandSnapshot: item.brandSnapshot,
+          transactionType: InventoryTransactionType.SALE,
+          physicalPieces: -item.physicalPieces, // Signed negative for stock removed
           salesQuantity: Types.Decimal128.fromString(
             String(item.salesQuantity),
           ),
           salesUnit: item.salesUnit,
-          physicalPieces: item.physicalPieces,
-          unitPrice: Types.Decimal128.fromString(item.unitPrice.toFixed(2)),
-          lineTotal: Types.Decimal128.fromString(item.lineTotal.toFixed(2)),
-        })),
-        subtotal: Types.Decimal128.fromString(subtotal.toFixed(2)),
-        totalAmount: Types.Decimal128.fromString(totalAmount.toFixed(2)),
-        status: OrderStatus.COMPLETED,
-        createdBy: userObjectId,
-      };
+          orderId: orderDoc._id,
+          createdBy: userObjectId,
+        }));
 
-      const [orderDoc] = await this.orderModel.create([orderData], { session });
+        await this.transactionModel.create(transactions, { session });
 
-      // 5d. Record SALE inventory transactions for audit trail
-      const transactions = preparedItems.map((item) => ({
-        productId: item.productId,
-        transactionType: InventoryTransactionType.SALE,
-        physicalPieces: -item.physicalPieces, // Signed negative for stock removed
-        salesQuantity: Types.Decimal128.fromString(
-          String(item.salesQuantity),
-        ),
-        salesUnit: item.salesUnit,
-        orderId: orderDoc._id,
-        createdBy: userObjectId,
-      }));
+        return { orderDoc, customerDoc: customer };
+      },
+    );
 
-      await this.transactionModel.create(transactions, { session });
-
-      return orderDoc;
-    });
-
-    return this.buildOrderResponse(createdOrder, customer, 0, []);
+    return this.buildOrderResponse(orderDoc, customerDoc, 0, []);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -408,7 +427,12 @@ export class OrdersService {
         createdAtFilter['$gte'] = new Date(query.startDate);
       }
       if (query.endDate) {
-        createdAtFilter['$lte'] = new Date(query.endDate);
+        // Exclusive upper bound ($lt next day) to include the entire calendar day
+        const parsedEnd = new Date(query.endDate);
+        const nextDay = new Date(parsedEnd);
+        nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+        nextDay.setUTCHours(0, 0, 0, 0);
+        createdAtFilter['$lt'] = nextDay;
       }
       filter.createdAt = createdAtFilter;
     }
@@ -544,14 +568,22 @@ export class OrdersService {
       }
 
       // 1. Restore exact physical pieces to inventory for each line item
+      // Verify that each inventory update actually returns an updated document.
+      // If inventory is missing, throw to abort transaction without creating SALE_REVERSAL or cancelling order.
       for (const item of order.items) {
-        await this.inventoryModel
+        const updatedInventory = await this.inventoryModel
           .findOneAndUpdate(
             { productId: item.productId },
             { $inc: { totalPieces: item.physicalPieces } },
             { new: true, session },
           )
           .exec();
+
+        if (!updatedInventory) {
+          throw new NotFoundException(
+            `Inventory record not found for product id ${item.productId.toString()}`,
+          );
+        }
       }
 
       // 2. Record SALE_REVERSAL audit records

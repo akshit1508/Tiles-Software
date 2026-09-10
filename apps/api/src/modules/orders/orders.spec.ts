@@ -143,6 +143,18 @@ function makePayment(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function mockQuery(resolvedValue: any) {
+  const query: any = {
+    session: jest.fn().mockReturnThis(),
+    sort: jest.fn().mockReturnThis(),
+    skip: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockReturnThis(),
+    select: jest.fn().mockReturnThis(),
+    exec: jest.fn().mockResolvedValue(resolvedValue),
+  };
+  return query;
+}
+
 const mockOwnerUser: AuthenticatedUser = {
   id: makeObjectId().toString(),
   name: 'Owner Brother',
@@ -218,9 +230,9 @@ describe('Orders Module Unit Tests', () => {
 
     orderModel = {
       create: jest.fn(),
-      find: jest.fn(),
-      findById: jest.fn(),
-      countDocuments: jest.fn(),
+      find: jest.fn().mockReturnValue(mockQuery([])),
+      findById: jest.fn().mockReturnValue(mockQuery(null)),
+      countDocuments: jest.fn().mockReturnValue(mockQuery(0)),
     };
 
     counterModel = {
@@ -228,18 +240,18 @@ describe('Orders Module Unit Tests', () => {
     };
 
     customerModel = {
-      findById: jest.fn(),
-      find: jest.fn(),
+      findById: jest.fn().mockReturnValue(mockQuery(null)),
+      find: jest.fn().mockReturnValue(mockQuery([])),
     };
 
     productModel = {
-      find: jest.fn(),
-      findById: jest.fn(),
+      find: jest.fn().mockReturnValue(mockQuery([])),
+      findById: jest.fn().mockReturnValue(mockQuery(null)),
     };
 
     inventoryModel = {
-      find: jest.fn(),
-      findOneAndUpdate: jest.fn(),
+      find: jest.fn().mockReturnValue(mockQuery([])),
+      findOneAndUpdate: jest.fn().mockReturnValue(mockQuery(null)),
     };
 
     transactionModel = {
@@ -247,7 +259,7 @@ describe('Orders Module Unit Tests', () => {
     };
 
     paymentModel = {
-      find: jest.fn(),
+      find: jest.fn().mockReturnValue(mockQuery([])),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -394,7 +406,7 @@ describe('Orders Module Unit Tests', () => {
 
   describe('OrdersService.create', () => {
     it('throws NotFoundException if customer does not exist', async () => {
-      customerModel.findById.mockReturnValue({ exec: jest.fn().mockResolvedValue(null) });
+      customerModel.findById.mockReturnValue(mockQuery(null));
 
       const dto: CreateOrderDto = {
         customerId: makeObjectId().toString(),
@@ -410,13 +422,12 @@ describe('Orders Module Unit Tests', () => {
       await expect(service.create(dto, mockOwnerUser.id)).rejects.toThrow(
         NotFoundException,
       );
+      expect(mockSession.abortTransaction).toHaveBeenCalled();
     });
 
-    it('throws BadRequestException if customer is deactivated', async () => {
+    it('throws BadRequestException and aborts transaction if customer is deactivated', async () => {
       const customer = makeCustomer({ isActive: false });
-      customerModel.findById.mockReturnValue({
-        exec: jest.fn().mockResolvedValue(customer),
-      });
+      customerModel.findById.mockReturnValue(mockQuery(customer));
 
       const dto: CreateOrderDto = {
         customerId: customer._id.toString(),
@@ -432,17 +443,14 @@ describe('Orders Module Unit Tests', () => {
       await expect(service.create(dto, mockOwnerUser.id)).rejects.toThrow(
         BadRequestException,
       );
+      expect(mockSession.abortTransaction).toHaveBeenCalled();
     });
 
     it('throws NotFoundException if product does not exist', async () => {
       const customer = makeCustomer();
-      customerModel.findById.mockReturnValue({
-        exec: jest.fn().mockResolvedValue(customer),
-      });
-      productModel.find.mockReturnValue({ exec: jest.fn().mockResolvedValue([]) });
-      inventoryModel.find.mockReturnValue({
-        exec: jest.fn().mockResolvedValue([]),
-      });
+      customerModel.findById.mockReturnValue(mockQuery(customer));
+      productModel.find.mockReturnValue(mockQuery([]));
+      inventoryModel.find.mockReturnValue(mockQuery([]));
 
       const dto: CreateOrderDto = {
         customerId: customer._id.toString(),
@@ -458,20 +466,17 @@ describe('Orders Module Unit Tests', () => {
       await expect(service.create(dto, mockOwnerUser.id)).rejects.toThrow(
         NotFoundException,
       );
+      expect(mockSession.abortTransaction).toHaveBeenCalled();
     });
 
     it('throws BadRequestException if product is deactivated', async () => {
       const customer = makeCustomer();
       const product = makeProduct({ isActive: false });
-      customerModel.findById.mockReturnValue({
-        exec: jest.fn().mockResolvedValue(customer),
-      });
-      productModel.find.mockReturnValue({
-        exec: jest.fn().mockResolvedValue([product]),
-      });
-      inventoryModel.find.mockReturnValue({
-        exec: jest.fn().mockResolvedValue([makeInventory(product._id, 100)]),
-      });
+      customerModel.findById.mockReturnValue(mockQuery(customer));
+      productModel.find.mockReturnValue(mockQuery([product]));
+      inventoryModel.find.mockReturnValue(
+        mockQuery([makeInventory(product._id, 100)]),
+      );
 
       const dto: CreateOrderDto = {
         customerId: customer._id.toString(),
@@ -487,20 +492,17 @@ describe('Orders Module Unit Tests', () => {
       await expect(service.create(dto, mockOwnerUser.id)).rejects.toThrow(
         BadRequestException,
       );
+      expect(mockSession.abortTransaction).toHaveBeenCalled();
     });
 
     it('rejects BOX sale with fractional quantity', async () => {
       const customer = makeCustomer();
       const product = makeProduct();
-      customerModel.findById.mockReturnValue({
-        exec: jest.fn().mockResolvedValue(customer),
-      });
-      productModel.find.mockReturnValue({
-        exec: jest.fn().mockResolvedValue([product]),
-      });
-      inventoryModel.find.mockReturnValue({
-        exec: jest.fn().mockResolvedValue([makeInventory(product._id, 100)]),
-      });
+      customerModel.findById.mockReturnValue(mockQuery(customer));
+      productModel.find.mockReturnValue(mockQuery([product]));
+      inventoryModel.find.mockReturnValue(
+        mockQuery([makeInventory(product._id, 100)]),
+      );
 
       const dto: CreateOrderDto = {
         customerId: customer._id.toString(),
@@ -524,15 +526,9 @@ describe('Orders Module Unit Tests', () => {
       const product = makeProduct({ piecesPerBox: 4 });
       const inventory = makeInventory(product._id, 7);
 
-      customerModel.findById.mockReturnValue({
-        exec: jest.fn().mockResolvedValue(customer),
-      });
-      productModel.find.mockReturnValue({
-        exec: jest.fn().mockResolvedValue([product]),
-      });
-      inventoryModel.find.mockReturnValue({
-        exec: jest.fn().mockResolvedValue([inventory]),
-      });
+      customerModel.findById.mockReturnValue(mockQuery(customer));
+      productModel.find.mockReturnValue(mockQuery([product]));
+      inventoryModel.find.mockReturnValue(mockQuery([inventory]));
 
       // Customer requests 2 boxes (= 8 pieces)
       const dto: CreateOrderDto = {
@@ -554,15 +550,11 @@ describe('Orders Module Unit Tests', () => {
     it('rejects PIECE sale with fractional quantity', async () => {
       const customer = makeCustomer();
       const product = makeProduct();
-      customerModel.findById.mockReturnValue({
-        exec: jest.fn().mockResolvedValue(customer),
-      });
-      productModel.find.mockReturnValue({
-        exec: jest.fn().mockResolvedValue([product]),
-      });
-      inventoryModel.find.mockReturnValue({
-        exec: jest.fn().mockResolvedValue([makeInventory(product._id, 100)]),
-      });
+      customerModel.findById.mockReturnValue(mockQuery(customer));
+      productModel.find.mockReturnValue(mockQuery([product]));
+      inventoryModel.find.mockReturnValue(
+        mockQuery([makeInventory(product._id, 100)]),
+      );
 
       const dto: CreateOrderDto = {
         customerId: customer._id.toString(),
@@ -585,15 +577,9 @@ describe('Orders Module Unit Tests', () => {
       const product = makeProduct();
       const inventory = makeInventory(product._id, 2);
 
-      customerModel.findById.mockReturnValue({
-        exec: jest.fn().mockResolvedValue(customer),
-      });
-      productModel.find.mockReturnValue({
-        exec: jest.fn().mockResolvedValue([product]),
-      });
-      inventoryModel.find.mockReturnValue({
-        exec: jest.fn().mockResolvedValue([inventory]),
-      });
+      customerModel.findById.mockReturnValue(mockQuery(customer));
+      productModel.find.mockReturnValue(mockQuery([product]));
+      inventoryModel.find.mockReturnValue(mockQuery([inventory]));
 
       const dto: CreateOrderDto = {
         customerId: customer._id.toString(),
@@ -620,15 +606,9 @@ describe('Orders Module Unit Tests', () => {
       });
       const inventory = makeInventory(product._id, 40);
 
-      customerModel.findById.mockReturnValue({
-        exec: jest.fn().mockResolvedValue(customer),
-      });
-      productModel.find.mockReturnValue({
-        exec: jest.fn().mockResolvedValue([product]),
-      });
-      inventoryModel.find.mockReturnValue({
-        exec: jest.fn().mockResolvedValue([inventory]),
-      });
+      customerModel.findById.mockReturnValue(mockQuery(customer));
+      productModel.find.mockReturnValue(mockQuery([product]));
+      inventoryModel.find.mockReturnValue(mockQuery([inventory]));
 
       // 6 sq.ft is 1.5 tiles -> invalid (tiles cannot be cut)
       const dto: CreateOrderDto = {
@@ -658,20 +638,14 @@ describe('Orders Module Unit Tests', () => {
       });
       const inventory = makeInventory(product._id, 100); // 25 boxes
 
-      customerModel.findById.mockReturnValue({
-        exec: jest.fn().mockResolvedValue(customer),
-      });
-      productModel.find.mockReturnValue({
-        exec: jest.fn().mockResolvedValue([product]),
-      });
-      inventoryModel.find.mockReturnValue({
-        exec: jest.fn().mockResolvedValue([inventory]),
-      });
+      customerModel.findById.mockReturnValue(mockQuery(customer));
+      productModel.find.mockReturnValue(mockQuery([product]));
+      inventoryModel.find.mockReturnValue(mockQuery([inventory]));
 
       counterModel.findOneAndUpdate.mockResolvedValue({ seq: 1 });
-      inventoryModel.findOneAndUpdate.mockReturnValue({
-        exec: jest.fn().mockResolvedValue({ ...inventory, totalPieces: 85 }),
-      });
+      inventoryModel.findOneAndUpdate.mockReturnValue(
+        mockQuery({ ...inventory, totalPieces: 85 }),
+      );
 
       const savedOrder = makeOrder({
         customerId: customer._id,
@@ -791,19 +765,13 @@ describe('Orders Module Unit Tests', () => {
       });
       const inventory = makeInventory(product._id, 100);
 
-      customerModel.findById.mockReturnValue({
-        exec: jest.fn().mockResolvedValue(customer),
-      });
-      productModel.find.mockReturnValue({
-        exec: jest.fn().mockResolvedValue([product]),
-      });
-      inventoryModel.find.mockReturnValue({
-        exec: jest.fn().mockResolvedValue([inventory]),
-      });
+      customerModel.findById.mockReturnValue(mockQuery(customer));
+      productModel.find.mockReturnValue(mockQuery([product]));
+      inventoryModel.find.mockReturnValue(mockQuery([inventory]));
       counterModel.findOneAndUpdate.mockResolvedValue({ seq: 5 });
-      inventoryModel.findOneAndUpdate.mockReturnValue({
-        exec: jest.fn().mockResolvedValue({ ...inventory, totalPieces: 96 }),
-      });
+      inventoryModel.findOneAndUpdate.mockReturnValue(
+        mockQuery({ ...inventory, totalPieces: 96 }),
+      );
 
       const savedOrder = makeOrder({
         customerId: customer._id,
@@ -848,21 +816,13 @@ describe('Orders Module Unit Tests', () => {
       const product = makeProduct();
       const inventory = makeInventory(product._id, 100);
 
-      customerModel.findById.mockReturnValue({
-        exec: jest.fn().mockResolvedValue(customer),
-      });
-      productModel.find.mockReturnValue({
-        exec: jest.fn().mockResolvedValue([product]),
-      });
-      inventoryModel.find.mockReturnValue({
-        exec: jest.fn().mockResolvedValue([inventory]),
-      });
+      customerModel.findById.mockReturnValue(mockQuery(customer));
+      productModel.find.mockReturnValue(mockQuery([product]));
+      inventoryModel.find.mockReturnValue(mockQuery([inventory]));
 
       counterModel.findOneAndUpdate.mockResolvedValue({ seq: 1 });
       // Simulate concurrent race condition failure
-      inventoryModel.findOneAndUpdate.mockReturnValue({
-        exec: jest.fn().mockResolvedValue(null),
-      });
+      inventoryModel.findOneAndUpdate.mockReturnValue(mockQuery(null));
 
       const dto: CreateOrderDto = {
         customerId: customer._id.toString(),
@@ -896,29 +856,18 @@ describe('Orders Module Unit Tests', () => {
         status: OrderStatus.CANCELLED,
       });
 
-      orderModel.find.mockReturnValue({
-        sort: jest.fn().mockReturnThis(),
-        skip: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        exec: jest.fn().mockResolvedValue([order1, order2]),
-      });
-      orderModel.countDocuments.mockReturnValue({
-        exec: jest.fn().mockResolvedValue(2),
-      });
+      orderModel.find.mockReturnValue(mockQuery([order1, order2]));
+      orderModel.countDocuments.mockReturnValue(mockQuery(2));
 
       const cust1 = makeCustomer({ _id: order1.customerId });
-      customerModel.find.mockReturnValue({
-        exec: jest.fn().mockResolvedValue([cust1]),
-      });
+      customerModel.find.mockReturnValue(mockQuery([cust1]));
 
       // Partial payment of 400 for order1
       const p1 = makePayment({
         orderId: order1._id,
         amount: Types.Decimal128.fromString('400.00'),
       });
-      paymentModel.find.mockReturnValue({
-        exec: jest.fn().mockResolvedValue([p1]),
-      });
+      paymentModel.find.mockReturnValue(mockQuery([p1]));
 
       const result = await service.findAll({ page: 1, limit: 20 });
 
@@ -935,20 +884,9 @@ describe('Orders Module Unit Tests', () => {
     });
 
     it('filters orders by search term on orderNumber and customer fields', async () => {
-      customerModel.find.mockReturnValue({
-        select: jest.fn().mockReturnThis(),
-        exec: jest.fn().mockResolvedValue([]),
-      });
-
-      orderModel.find.mockReturnValue({
-        sort: jest.fn().mockReturnThis(),
-        skip: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        exec: jest.fn().mockResolvedValue([]),
-      });
-      orderModel.countDocuments.mockReturnValue({
-        exec: jest.fn().mockResolvedValue(0),
-      });
+      customerModel.find.mockReturnValue(mockQuery([]));
+      orderModel.find.mockReturnValue(mockQuery([]));
+      orderModel.countDocuments.mockReturnValue(mockQuery(0));
 
       const result = await service.findAll({ search: 'GT-2026' });
       expect(result.data).toEqual([]);
@@ -962,6 +900,21 @@ describe('Orders Module Unit Tests', () => {
         }),
       );
     });
+
+    it('filters orders by endDate using exclusive upper bound ($lt next day) to include entire calendar day', async () => {
+      orderModel.find.mockReturnValue(mockQuery([]));
+      orderModel.countDocuments.mockReturnValue(mockQuery(0));
+
+      await service.findAll({ endDate: '2026-09-10' });
+
+      expect(orderModel.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          createdAt: {
+            $lt: new Date('2026-09-11T00:00:00.000Z'),
+          },
+        }),
+      );
+    });
   });
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -970,9 +923,7 @@ describe('Orders Module Unit Tests', () => {
 
   describe('OrdersService.findOne', () => {
     it('throws NotFoundException if order does not exist', async () => {
-      orderModel.findById.mockReturnValue({
-        exec: jest.fn().mockResolvedValue(null),
-      });
+      orderModel.findById.mockReturnValue(mockQuery(null));
 
       await expect(service.findOne(makeObjectId().toString())).rejects.toThrow(
         NotFoundException,
@@ -987,16 +938,9 @@ describe('Orders Module Unit Tests', () => {
         amount: Types.Decimal128.fromString('1000.00'),
       });
 
-      orderModel.findById.mockReturnValue({
-        exec: jest.fn().mockResolvedValue(order),
-      });
-      customerModel.findById.mockReturnValue({
-        exec: jest.fn().mockResolvedValue(customer),
-      });
-      paymentModel.find.mockReturnValue({
-        sort: jest.fn().mockReturnThis(),
-        exec: jest.fn().mockResolvedValue([payment]),
-      });
+      orderModel.findById.mockReturnValue(mockQuery(order));
+      customerModel.findById.mockReturnValue(mockQuery(customer));
+      paymentModel.find.mockReturnValue(mockQuery([payment]));
 
       const result = await service.findOne(order._id.toString());
 
@@ -1015,10 +959,7 @@ describe('Orders Module Unit Tests', () => {
 
   describe('OrdersService.cancel', () => {
     it('throws NotFoundException if order does not exist', async () => {
-      orderModel.findById.mockReturnValue({
-        session: jest.fn().mockReturnThis(),
-        exec: jest.fn().mockResolvedValue(null),
-      });
+      orderModel.findById.mockReturnValue(mockQuery(null));
 
       await expect(
         service.cancel(makeObjectId().toString(), mockOwnerUser.id),
@@ -1027,10 +968,7 @@ describe('Orders Module Unit Tests', () => {
 
     it('strictly rejects already cancelled order (idempotent rejection, no stock re-restoration)', async () => {
       const order = makeOrder({ status: OrderStatus.CANCELLED });
-      orderModel.findById.mockReturnValue({
-        session: jest.fn().mockReturnThis(),
-        exec: jest.fn().mockResolvedValue(order),
-      });
+      orderModel.findById.mockReturnValue(mockQuery(order));
 
       await expect(
         service.cancel(order._id.toString(), mockOwnerUser.id),
@@ -1048,23 +986,12 @@ describe('Orders Module Unit Tests', () => {
       });
       const customer = makeCustomer({ _id: order.customerId });
 
-      orderModel.findById.mockReturnValue({
-        session: jest.fn().mockReturnThis(),
-        exec: jest.fn().mockResolvedValue(order),
-      });
-
-      inventoryModel.findOneAndUpdate.mockReturnValue({
-        exec: jest.fn().mockResolvedValue({}),
-      });
+      orderModel.findById.mockReturnValue(mockQuery(order));
+      inventoryModel.findOneAndUpdate.mockReturnValue(mockQuery({}));
       transactionModel.create.mockResolvedValue([]);
 
-      customerModel.findById.mockReturnValue({
-        exec: jest.fn().mockResolvedValue(customer),
-      });
-      paymentModel.find.mockReturnValue({
-        sort: jest.fn().mockReturnThis(),
-        exec: jest.fn().mockResolvedValue([]),
-      });
+      customerModel.findById.mockReturnValue(mockQuery(customer));
+      paymentModel.find.mockReturnValue(mockQuery([]));
 
       const result = await service.cancel(order._id.toString(), mockOwnerUser.id);
 
@@ -1092,6 +1019,29 @@ describe('Orders Module Unit Tests', () => {
 
       // Verify atomic commit
       expect(mockSession.commitTransaction).toHaveBeenCalled();
+    });
+
+    it('throws NotFoundException and aborts transaction without creating SALE_REVERSAL or cancelling order if inventory record is missing', async () => {
+      const order = makeOrder({ status: OrderStatus.COMPLETED });
+
+      orderModel.findById.mockReturnValue(mockQuery(order));
+      // Simulate findOneAndUpdate returning null (missing inventory document)
+      inventoryModel.findOneAndUpdate.mockReturnValue(mockQuery(null));
+
+      await expect(
+        service.cancel(order._id.toString(), mockOwnerUser.id),
+      ).rejects.toThrow('Inventory record not found for product id');
+
+      // Verify transaction aborted
+      expect(mockSession.abortTransaction).toHaveBeenCalled();
+      expect(mockSession.endSession).toHaveBeenCalled();
+
+      // Verify SALE_REVERSAL was NOT created
+      expect(transactionModel.create).not.toHaveBeenCalled();
+
+      // Verify order was NOT saved as cancelled
+      expect(order.save).not.toHaveBeenCalled();
+      expect(order.status).toBe(OrderStatus.COMPLETED);
     });
   });
 
