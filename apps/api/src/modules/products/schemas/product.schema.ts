@@ -156,4 +156,7 @@ ProductSchema.index({ brand: 1 });
 ProductSchema.index({ productName: 1 });
 ProductSchema.index({ category: 1 });
 ProductSchema.index({ isActive: 1 });
-ProductSchema.index({ gallaNumber: 1 });
+// gallaNumber is the unique business identifier (SKU equivalent). Enforced at
+// the database level so concurrent requests cannot both succeed on the same value.
+ProductSchema.index({ gallaNumber: 1 }, { unique: true });
+
