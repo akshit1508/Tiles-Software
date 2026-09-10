@@ -75,7 +75,7 @@ export class CustomersController {
 
   /**
    * PATCH /customers/:id
-   * Partially updates mutable profile fields (name, phone, address).
+   * Partially updates mutable customer profile fields (name, phone, address, isActive).
    * Restricted to OWNER role.
    */
   @Patch(':id')

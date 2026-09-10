@@ -535,6 +535,47 @@ describe('Customers Module Unit Tests', () => {
       expect(result.data[0].totalOrders).toBe(0);
       expect(result.data[0].outstandingBalance).toBe(0);
     });
+
+    it('4.5 correctly derives negative outstanding for an overpaid completed order without clamping to zero', async () => {
+      const cust = makeCustomer();
+      const mockQuery = {
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([cust]),
+      };
+      customerModel.find.mockReturnValue(mockQuery);
+      customerModel.countDocuments.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(1),
+      });
+
+      const order1 = makeOrder({
+        _id: new Types.ObjectId(),
+        customerId: cust._id,
+        status: OrderStatus.COMPLETED,
+        totalAmount: Types.Decimal128.fromString('40000.00'),
+      });
+
+      orderModel.find.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([order1]),
+      });
+
+      const overpayment = makePayment({
+        customerId: cust._id,
+        orderId: order1._id,
+        amount: Types.Decimal128.fromString('50000.00'),
+      });
+
+      paymentModel.find.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([overpayment]),
+      });
+
+      const result = await service.findAll({});
+      expect(result.data[0].totalOrders).toBe(1);
+      expect(result.data[0].outstandingBalance).toBe(-10000);
+    });
   });
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -668,6 +709,48 @@ describe('Customers Module Unit Tests', () => {
       expect(result.orders[0].paidAmount).toBe(40000);
       expect(result.orders[0].outstandingAmount).toBe(10000);
       expect(result.outstandingBalance).toBe(10000);
+    });
+
+    it('5.5 correctly derives negative outstanding for an overpaid completed order without clamping to zero', async () => {
+      const cust = makeCustomer();
+      customerModel.findById.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(cust),
+      });
+
+      const order1 = makeOrder({
+        _id: new Types.ObjectId(),
+        orderNumber: 'GT-20260101-0001',
+        customerId: cust._id,
+        status: OrderStatus.COMPLETED,
+        totalAmount: Types.Decimal128.fromString('40000.00'),
+      });
+
+      orderModel.find.mockReturnValue({
+        sort: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([order1]),
+      });
+
+      const overpayment = makePayment({
+        _id: new Types.ObjectId(),
+        customerId: cust._id,
+        orderId: order1._id,
+        amount: Types.Decimal128.fromString('50000.00'),
+      });
+
+      paymentModel.find.mockReturnValue({
+        sort: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([overpayment]),
+      });
+
+      const result = await service.findOne(cust._id.toString());
+
+      expect(result.customer._id).toEqual(cust._id);
+      expect(result.totalOrders).toBe(1);
+      expect(result.payments.length).toBe(1);
+      expect(result.orders[0].totalAmount).toBe(40000);
+      expect(result.orders[0].paidAmount).toBe(50000);
+      expect(result.orders[0].outstandingAmount).toBe(-10000);
+      expect(result.outstandingBalance).toBe(-10000);
     });
   });
 

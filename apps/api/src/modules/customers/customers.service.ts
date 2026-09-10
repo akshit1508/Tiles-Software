@@ -167,9 +167,7 @@ export class CustomersService {
         (sum, p) => sum + toPaise(p.amount),
         0,
       );
-      const outstandingBalance = paiseToRupees(
-        Math.max(0, ordersPaise - paymentsPaise),
-      );
+      const outstandingBalance = paiseToRupees(ordersPaise - paymentsPaise);
 
       return {
         _id: custIdStr,
@@ -235,9 +233,7 @@ export class CustomersService {
       const orderPaise = toPaise(o.totalAmount);
       const paidPaise = paymentsByOrder.get(oId) ?? 0;
       const isCompleted = o.status === OrderStatus.COMPLETED;
-      const outstandingPaise = isCompleted
-        ? Math.max(0, orderPaise - paidPaise)
-        : 0;
+      const outstandingPaise = isCompleted ? orderPaise - paidPaise : 0;
 
       return {
         _id: oId,
@@ -278,7 +274,7 @@ export class CustomersService {
       .reduce((sum, p) => sum + toPaise(p.amount), 0);
 
     const outstandingBalance = paiseToRupees(
-      Math.max(0, completedOrdersPaise - validPaymentsPaise),
+      completedOrdersPaise - validPaymentsPaise,
     );
 
     return {
@@ -295,8 +291,7 @@ export class CustomersService {
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Partially updates mutable customer profile fields (name, phone, address).
-   * isActive cannot be modified here — use activate/deactivate.
+   * Partially updates mutable customer profile fields (name, phone, address, isActive).
    */
   async update(id: string, dto: UpdateCustomerDto): Promise<CustomerDocument> {
     this.validateObjectId(id);
