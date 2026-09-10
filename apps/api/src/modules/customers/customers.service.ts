@@ -167,7 +167,9 @@ export class CustomersService {
         (sum, p) => sum + toPaise(p.amount),
         0,
       );
-      const outstandingBalance = paiseToRupees(ordersPaise - paymentsPaise);
+      const outstandingBalance = paiseToRupees(
+        Math.max(0, ordersPaise - paymentsPaise),
+      );
 
       return {
         _id: custIdStr,
@@ -233,7 +235,9 @@ export class CustomersService {
       const orderPaise = toPaise(o.totalAmount);
       const paidPaise = paymentsByOrder.get(oId) ?? 0;
       const isCompleted = o.status === OrderStatus.COMPLETED;
-      const outstandingPaise = isCompleted ? orderPaise - paidPaise : 0;
+      const outstandingPaise = isCompleted
+        ? Math.max(0, orderPaise - paidPaise)
+        : 0;
 
       return {
         _id: oId,
@@ -274,7 +278,7 @@ export class CustomersService {
       .reduce((sum, p) => sum + toPaise(p.amount), 0);
 
     const outstandingBalance = paiseToRupees(
-      completedOrdersPaise - validPaymentsPaise,
+      Math.max(0, completedOrdersPaise - validPaymentsPaise),
     );
 
     return {

@@ -536,7 +536,7 @@ describe('Customers Module Unit Tests', () => {
       expect(result.data[0].outstandingBalance).toBe(0);
     });
 
-    it('4.5 correctly derives negative outstanding for an overpaid completed order without clamping to zero', async () => {
+    it('4.5 enforces non-negative invariant: outstandingBalance is floored at 0 even if payments exceed order total', async () => {
       const cust = makeCustomer();
       const mockQuery = {
         skip: jest.fn().mockReturnThis(),
@@ -574,7 +574,7 @@ describe('Customers Module Unit Tests', () => {
 
       const result = await service.findAll({});
       expect(result.data[0].totalOrders).toBe(1);
-      expect(result.data[0].outstandingBalance).toBe(-10000);
+      expect(result.data[0].outstandingBalance).toBe(0);
     });
   });
 
@@ -711,7 +711,7 @@ describe('Customers Module Unit Tests', () => {
       expect(result.outstandingBalance).toBe(10000);
     });
 
-    it('5.5 correctly derives negative outstanding for an overpaid completed order without clamping to zero', async () => {
+    it('5.5 enforces non-negative invariant: customer and order outstanding never become negative from payment calculations', async () => {
       const cust = makeCustomer();
       customerModel.findById.mockReturnValue({
         exec: jest.fn().mockResolvedValue(cust),
@@ -749,8 +749,8 @@ describe('Customers Module Unit Tests', () => {
       expect(result.payments.length).toBe(1);
       expect(result.orders[0].totalAmount).toBe(40000);
       expect(result.orders[0].paidAmount).toBe(50000);
-      expect(result.orders[0].outstandingAmount).toBe(-10000);
-      expect(result.outstandingBalance).toBe(-10000);
+      expect(result.orders[0].outstandingAmount).toBe(0);
+      expect(result.outstandingBalance).toBe(0);
     });
   });
 
