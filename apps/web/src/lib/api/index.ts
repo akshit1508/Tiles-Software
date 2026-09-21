@@ -5,3 +5,5 @@ export * from './inventory';
 export * from './customers';
 export * from './orders';
 export * from './payments';
+export * from './dashboard';
+export * from './outstanding';
