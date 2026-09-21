@@ -40,6 +40,7 @@ export default function OutstandingPage() {
   // Modals state
   const [selectedCustomerForBreakdown, setSelectedCustomerForBreakdown] =
     useState<CustomerOutstandingListItem | null>(null);
+  const [breakdownRefreshTrigger, setBreakdownRefreshTrigger] = useState(0);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [paymentTargetOrder, setPaymentTargetOrder] = useState<Order | null>(null);
   const [isLoadingOrderForPayment, setIsLoadingOrderForPayment] = useState(false);
@@ -106,12 +107,10 @@ export default function OutstandingPage() {
     );
     setIsPaymentModalOpen(false);
     setPaymentTargetOrder(null);
-    // Refresh the debtor list
+    // 1. Refresh the debtor list from backend
     fetchCustomers();
-    // Refresh the open customer breakdown modal if one is active
-    if (selectedCustomerForBreakdown) {
-      setSelectedCustomerForBreakdown({ ...selectedCustomerForBreakdown });
-    }
+    // 2. Increment refresh trigger to reload open customer breakdown from backend
+    setBreakdownRefreshTrigger((prev) => prev + 1);
   };
 
   const currentViewOutstandingTotal = customers.reduce(
@@ -256,6 +255,7 @@ export default function OutstandingPage() {
         onClose={() => setSelectedCustomerForBreakdown(null)}
         customerItem={selectedCustomerForBreakdown}
         onRecordPaymentForOrder={handleRecordPaymentForOrder}
+        refreshTrigger={breakdownRefreshTrigger}
       />
 
       {/* Reused Payment Form Modal */}

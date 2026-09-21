@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Calendar, X, Filter } from 'lucide-react';
 import { Button, Input } from '@/components/ui';
 
@@ -7,6 +7,26 @@ interface DashboardDateFilterProps {
   endDate?: string;
   onFilterChange: (dates: { startDate?: string; endDate?: string }) => void;
   isLoading?: boolean;
+}
+
+/**
+ * Formats a Date instance as YYYY-MM-DD using local calendar components.
+ * Prevents UTC timezone shifts from .toISOString().
+ */
+export function formatCalendarDate(d: Date = new Date()): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Returns YYYY-MM-01 for the start of the month using local calendar components.
+ */
+export function formatMonthStartDate(d: Date = new Date()): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}-01`;
 }
 
 export function DashboardDateFilter({
@@ -19,12 +39,20 @@ export function DashboardDateFilter({
   const [localEndDate, setLocalEndDate] = useState(endDate ? endDate.slice(0, 10) : '');
   const [activePreset, setActivePreset] = useState<'all' | 'today' | 'month' | 'custom'>('all');
 
+  useEffect(() => {
+    setLocalStartDate(startDate ? startDate.slice(0, 10) : '');
+  }, [startDate]);
+
+  useEffect(() => {
+    setLocalEndDate(endDate ? endDate.slice(0, 10) : '');
+  }, [endDate]);
+
   const handleApplyCustom = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setActivePreset('custom');
     onFilterChange({
-      startDate: localStartDate ? new Date(localStartDate).toISOString() : undefined,
-      endDate: localEndDate ? new Date(localEndDate + 'T23:59:59.999Z').toISOString() : undefined,
+      startDate: localStartDate.trim() ? localStartDate.trim() : undefined,
+      endDate: localEndDate.trim() ? localEndDate.trim() : undefined,
     });
   };
 
@@ -37,23 +65,21 @@ export function DashboardDateFilter({
       setLocalEndDate('');
       onFilterChange({ startDate: undefined, endDate: undefined });
     } else if (preset === 'today') {
-      const todayStr = now.toISOString().slice(0, 10);
+      const todayStr = formatCalendarDate(now);
       setLocalStartDate(todayStr);
       setLocalEndDate(todayStr);
       onFilterChange({
-        startDate: new Date(todayStr).toISOString(),
-        endDate: new Date(todayStr + 'T23:59:59.999Z').toISOString(),
+        startDate: todayStr,
+        endDate: todayStr,
       });
     } else if (preset === 'month') {
-      const firstDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
-        .toISOString()
-        .slice(0, 10);
-      const todayStr = now.toISOString().slice(0, 10);
-      setLocalStartDate(firstDay);
+      const monthStartStr = formatMonthStartDate(now);
+      const todayStr = formatCalendarDate(now);
+      setLocalStartDate(monthStartStr);
       setLocalEndDate(todayStr);
       onFilterChange({
-        startDate: new Date(firstDay).toISOString(),
-        endDate: new Date(todayStr + 'T23:59:59.999Z').toISOString(),
+        startDate: monthStartStr,
+        endDate: todayStr,
       });
     }
   };

@@ -107,7 +107,7 @@ export function DashboardKpiGrid({ summary }: DashboardKpiGridProps) {
       <Card className="p-4 shadow-sm relative overflow-hidden">
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-            Orders
+            Total Orders
           </span>
           <div className="rounded-lg bg-purple-50 p-2 text-purple-600">
             <ShoppingCart className="h-4 w-4" />
@@ -118,7 +118,10 @@ export function DashboardKpiGrid({ summary }: DashboardKpiGridProps) {
             {summary.totalOrders}
           </div>
           <div className="mt-1 flex items-center justify-between text-xs text-slate-500">
-            <span>Shop transactions</span>
+            <span>
+              {summary.completedOrders} completed
+              {summary.cancelledOrders > 0 && `, ${summary.cancelledOrders} cancelled`}
+            </span>
             <Link
               href="/orders"
               className="text-purple-600 hover:text-purple-800 font-medium inline-flex items-center"

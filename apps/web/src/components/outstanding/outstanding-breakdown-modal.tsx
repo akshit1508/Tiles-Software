@@ -19,13 +19,14 @@ import {
 } from '@/lib/api/outstanding';
 import { formatCurrencyINR } from '@/lib/api/products';
 import { ApiError } from '@/lib/api';
-import { User, Phone, MapPin, CreditCard, ShoppingBag, Clock } from 'lucide-react';
+import { User, Phone, MapPin, CreditCard, ShoppingBag, Clock, CheckCircle2 } from 'lucide-react';
 
 interface OutstandingBreakdownModalProps {
   isOpen: boolean;
   onClose: () => void;
   customerItem: CustomerOutstandingListItem | null;
   onRecordPaymentForOrder: (orderId: string) => void;
+  refreshTrigger?: number;
 }
 
 export function OutstandingBreakdownModal({
@@ -33,6 +34,7 @@ export function OutstandingBreakdownModal({
   onClose,
   customerItem,
   onRecordPaymentForOrder,
+  refreshTrigger,
 }: OutstandingBreakdownModalProps) {
   const [detail, setDetail] = useState<CustomerOutstandingDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -63,7 +65,7 @@ export function OutstandingBreakdownModal({
     if (isOpen && customerItem?.customerId) {
       fetchDetail();
     }
-  }, [isOpen, customerItem?.customerId, fetchDetail]);
+  }, [isOpen, customerItem?.customerId, refreshTrigger, fetchDetail]);
 
   const formatDateTime = (isoDate: string) => {
     try {
@@ -123,10 +125,10 @@ export function OutstandingBreakdownModal({
                 </div>
 
                 <div className="text-right">
-                  <div className="text-[11px] font-semibold text-amber-800 uppercase tracking-wider">
+                  <div className={`text-[11px] font-semibold uppercase tracking-wider ${detail.outstanding > 0 ? 'text-amber-800' : 'text-emerald-800'}`}>
                     Total Outstanding
                   </div>
-                  <div className="font-mono text-xl font-bold text-amber-700">
+                  <div className={`font-mono text-xl font-bold ${detail.outstanding > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
                     {formatCurrencyINR(detail.outstanding)}
                   </div>
                 </div>
@@ -148,11 +150,18 @@ export function OutstandingBreakdownModal({
                 </div>
                 <div className="bg-white rounded-lg p-2.5 border border-slate-200">
                   <div className="text-[11px] text-slate-500 font-medium">Outstanding Balance</div>
-                  <div className="font-mono text-sm font-bold text-amber-700 mt-0.5">
+                  <div className={`font-mono text-sm font-bold mt-0.5 ${detail.outstanding > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
                     {formatCurrencyINR(detail.outstanding)}
                   </div>
                 </div>
               </div>
+
+              {detail.outstanding === 0 && (
+                <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-2.5 text-xs text-emerald-800 flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <span className="font-medium">All completed orders for this customer are now fully settled.</span>
+                </div>
+              )}
             </div>
 
             {/* Orders Breakdown Table */}
