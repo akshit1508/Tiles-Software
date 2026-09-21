@@ -1,10 +1,11 @@
-﻿import {
+import {
   IsString,
   IsNotEmpty,
   IsNumber,
   IsInt,
   IsOptional,
   IsArray,
+  ArrayMaxSize,
   ValidateNested,
   IsUrl,
   Min,
@@ -130,6 +131,7 @@ export class CreateProductDto {
 
   /** External image references (URL, publicId, alt). Not binary blobs. */
   @IsArray({ message: 'images must be an array' })
+  @ArrayMaxSize(5, { message: 'images cannot contain more than 5 items' })
   @ValidateNested({ each: true })
   @Type(() => ImageReferenceDto)
   @IsOptional()

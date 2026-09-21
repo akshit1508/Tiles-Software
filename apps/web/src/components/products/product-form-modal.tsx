@@ -1,10 +1,12 @@
+/* eslint-disable @next/next/no-img-element */
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { AlertCircle } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { AlertCircle, Upload, X, Loader2, Image as ImageIcon } from 'lucide-react';
 import { Modal, Button, Input } from '@/components/ui';
 import {
   Product,
+  ImageReference,
   CreateProductInput,
   UpdateProductInput,
   productsApi,
@@ -62,6 +64,13 @@ export function ProductFormModal({
   const [serverError, setServerError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Product Photos state
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [images, setImages] = useState<ImageReference[]>([]);
+  const [isUploadingImages, setIsUploadingImages] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+
   useEffect(() => {
     if (product) {
       setForm({
@@ -78,12 +87,64 @@ export function ProductFormModal({
         sellingPrice: String(parseDecimalValue(product.sellingPrice)),
         minimumStockPieces: String(product.minimumStockPieces ?? 0),
       });
+      setImages(product.images || []);
     } else {
       setForm(initialFormState);
+      setImages([]);
     }
     setFieldErrors({});
     setServerError(null);
+    setUploadError(null);
   }, [product, isOpen]);
+
+  const handleFiles = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+    setUploadError(null);
+
+    const newFiles = Array.from(fileList);
+    const totalCount = images.length + newFiles.length;
+    if (totalCount > 5) {
+      setUploadError(
+        `Maximum 5 images allowed per product. Currently has ${images.length}; tried to add ${newFiles.length}.`,
+      );
+      return;
+    }
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    for (const file of newFiles) {
+      if (!allowedTypes.includes(file.type)) {
+        setUploadError(`Invalid file type: ${file.name}. Allowed: JPG, PNG, WebP.`);
+        return;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        setUploadError(`File too large: ${file.name} exceeds 5MB limit.`);
+        return;
+      }
+    }
+
+    try {
+      setIsUploadingImages(true);
+      const uploadedRefs = await productsApi.uploadImages(newFiles);
+      setImages((prev) => [...prev, ...uploadedRefs]);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setUploadError(err.message || 'Image upload failed.');
+      } else if (err instanceof Error) {
+        setUploadError(err.message);
+      } else {
+        setUploadError('Failed to upload image. Please try again.');
+      }
+    } finally {
+      setIsUploadingImages(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleRemoveImage = (indexToRemove: number) => {
+    setImages((prev) => prev.filter((_, idx) => idx !== indexToRemove));
+  };
 
   const handleChange = (field: keyof FormState, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -154,10 +215,11 @@ export function ProductFormModal({
         purchasePrice: parseFloat(form.purchasePrice),
         sellingPrice: parseFloat(form.sellingPrice),
         minimumStockPieces: parseInt(form.minimumStockPieces, 10) || 0,
+        images,
       };
 
       if (isEdit && product) {
-        const updatePayload: UpdateProductInput = { ...payload };
+        const updatePayload: UpdateProductInput = { ...payload, images };
         await productsApi.update(product._id, updatePayload);
       } else {
         await productsApi.create(payload);
@@ -365,6 +427,106 @@ export function ProductFormModal({
               disabled={isSubmitting}
             />
           </div>
+        </div>
+
+        {/* Product Photos Section */}
+        <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3.5 space-y-3">
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-700">
+              Product Photos ({images.length} / 5)
+            </h4>
+            <span className="text-[11px] text-slate-500">Max 5MB per file • JPG, PNG, WebP</span>
+          </div>
+
+          {/* Upload Dropzone / Button */}
+          {images.length < 5 && (
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDragOver(true);
+              }}
+              onDragLeave={() => setIsDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDragOver(false);
+                handleFiles(e.dataTransfer.files);
+              }}
+              onClick={() => !isUploadingImages && fileInputRef.current?.click()}
+              className={`flex flex-col items-center justify-center p-4 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
+                isDragOver
+                  ? 'border-blue-500 bg-blue-50/50'
+                  : 'border-slate-300 hover:border-slate-400 bg-white'
+              }`}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                disabled={isUploadingImages || isSubmitting}
+                onChange={(e) => handleFiles(e.target.files)}
+              />
+              {isUploadingImages ? (
+                <div className="flex items-center gap-2 text-sm text-slate-600 py-1">
+                  <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+                  <span className="font-medium">Uploading images...</span>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center text-center">
+                  <Upload className="h-6 w-6 text-slate-400 mb-1" />
+                  <span className="text-xs font-medium text-slate-700">
+                    Click to browse or drag & drop tile photos
+                  </span>
+                  <span className="text-[10px] text-slate-400 mt-0.5">
+                    Images will be uploaded to cloud storage
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {uploadError && (
+            <div className="flex items-center gap-2 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-md p-2">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0 text-rose-600" />
+              <span>{uploadError}</span>
+            </div>
+          )}
+
+          {/* Image Thumbnails Grid */}
+          {images.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-1">
+              {images.map((img, idx) => (
+                <div
+                  key={img.publicId || img.url || idx}
+                  className="group relative aspect-square rounded-lg border border-slate-200 bg-slate-100 overflow-hidden shadow-2xs"
+                >
+                  <img
+                    src={img.url}
+                    alt={img.alt || `Product image ${idx + 1}`}
+                    className="h-full w-full object-cover"
+                  />
+                  {idx === 0 && (
+                    <span className="absolute bottom-1 left-1 bg-slate-900/80 text-white text-[9px] font-semibold px-1.5 py-0.5 rounded shadow-xs">
+                      Main
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRemoveImage(idx);
+                    }}
+                    className="absolute top-1 right-1 p-1 bg-white/90 hover:bg-white text-slate-600 hover:text-rose-600 rounded-full shadow-xs opacity-90 group-hover:opacity-100 transition-opacity"
+                    title="Remove image"
+                    disabled={isSubmitting || isUploadingImages}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="mt-6 flex justify-end space-x-3 pt-2">

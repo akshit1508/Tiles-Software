@@ -1,4 +1,4 @@
-﻿import {
+import {
   Injectable,
   NotFoundException,
   ConflictException,
@@ -12,6 +12,7 @@ import { Inventory, InventoryDocument } from '../inventory/schemas/inventory.sch
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ListProductsDto } from './dto/list-products.dto';
+import { CloudinaryService, UploadedImageResult } from '../cloudinary';
 
 /** Mongoose duplicate-key error code */
 const MONGO_DUPLICATE_KEY_CODE = 11000;
@@ -31,7 +32,15 @@ export class ProductsService {
   constructor(
     @InjectModel(Product.name) private readonly productModel: Model<ProductDocument>,
     @InjectModel(Inventory.name) private readonly inventoryModel: Model<InventoryDocument>,
+    private readonly cloudinaryService: CloudinaryService,
   ) {}
+
+  /**
+   * Uploads multiple product images to Cloudinary via CloudinaryService.
+   */
+  async uploadImages(files: Express.Multer.File[]): Promise<UploadedImageResult[]> {
+    return this.cloudinaryService.uploadMultipleImages(files);
+  }
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Create

@@ -1,7 +1,8 @@
+/* eslint-disable @next/next/no-img-element */
 'use client';
 
 import React from 'react';
-import { Edit2, Ban, CheckCircle2 } from 'lucide-react';
+import { Edit2, Ban, CheckCircle2, Image as ImageIcon } from 'lucide-react';
 import {
   Table,
   TableHeader,
@@ -56,10 +57,25 @@ export function ProductTable({
             return (
               <TableRow key={product._id}>
                 <TableCell>
-                  <div className="font-semibold text-slate-900">
-                    {product.productName}
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-slate-100 flex items-center justify-center">
+                      {product.images && product.images.length > 0 ? (
+                        <img
+                          src={product.images[0].url}
+                          alt={product.images[0].alt || product.productName}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <ImageIcon className="h-4 w-4 text-slate-400" />
+                      )}
+                    </div>
+                    <div>
+                      <div className="font-semibold text-slate-900">
+                        {product.productName}
+                      </div>
+                      <div className="text-xs text-slate-500">{product.brand}</div>
+                    </div>
                   </div>
-                  <div className="text-xs text-slate-500">{product.brand}</div>
                 </TableCell>
 
                 <TableCell>

@@ -44,6 +44,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { ROLES_KEY } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../common/enums';
+import { CloudinaryService } from '../cloudinary';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -98,6 +99,11 @@ describe('Products Module Unit Tests', () => {
   let inventoryModel: {
     create: jest.Mock;
   };
+  let cloudinaryService: {
+    uploadImage: jest.Mock;
+    uploadMultipleImages: jest.Mock;
+    getIsConfigured: jest.Mock;
+  };
 
   beforeEach(async () => {
     productModel = {
@@ -113,12 +119,19 @@ describe('Products Module Unit Tests', () => {
       create: jest.fn(),
     };
 
+    cloudinaryService = {
+      uploadImage: jest.fn(),
+      uploadMultipleImages: jest.fn(),
+      getIsConfigured: jest.fn().mockReturnValue(true),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ProductsController],
       providers: [
         ProductsService,
         { provide: getModelToken(Product.name), useValue: productModel },
         { provide: getModelToken(Inventory.name), useValue: inventoryModel },
+        { provide: CloudinaryService, useValue: cloudinaryService },
       ],
     })
       .overrideGuard(JwtAuthGuard)
@@ -494,11 +507,13 @@ describe('Products Module Unit Tests', () => {
       const updateRoles = Reflect.getMetadata(ROLES_KEY, ProductsController.prototype.update);
       const activateRoles = Reflect.getMetadata(ROLES_KEY, ProductsController.prototype.activate);
       const deactivateRoles = Reflect.getMetadata(ROLES_KEY, ProductsController.prototype.deactivate);
+      const uploadImagesRoles = Reflect.getMetadata(ROLES_KEY, ProductsController.prototype.uploadImages);
 
       expect(createRoles).toEqual([UserRole.OWNER]);
       expect(updateRoles).toEqual([UserRole.OWNER]);
       expect(activateRoles).toEqual([UserRole.OWNER]);
       expect(deactivateRoles).toEqual([UserRole.OWNER]);
+      expect(uploadImagesRoles).toEqual([UserRole.OWNER]);
     });
 
     it('26. GET endpoints do NOT have @Roles decorator (allowing any authenticated user)', () => {
@@ -579,6 +594,208 @@ describe('Products Module Unit Tests', () => {
       const jwtGuard = new JwtAuthGuard();
       const mockUser = { id: '123', role: UserRole.OWNER };
       expect(jwtGuard.handleRequest(null, mockUser)).toEqual(mockUser);
+    });
+
+    it('34. RolesGuard blocks non-OWNER user on uploadImages with ForbiddenException', () => {
+      const context = {
+        getHandler: () => ProductsController.prototype.uploadImages,
+        getClass: () => ProductsController,
+        switchToHttp: () => ({
+          getRequest: () => ({ user: { role: 'STAFF' } }),
+        }),
+      } as unknown as ExecutionContext;
+
+      expect(() => rolesGuard.canActivate(context)).toThrow(ForbiddenException);
+    });
+
+    it('35. RolesGuard permits OWNER user on uploadImages', () => {
+      const context = {
+        getHandler: () => ProductsController.prototype.uploadImages,
+        getClass: () => ProductsController,
+        switchToHttp: () => ({
+          getRequest: () => ({ user: { role: UserRole.OWNER } }),
+        }),
+      } as unknown as ExecutionContext;
+
+      expect(rolesGuard.canActivate(context)).toBe(true);
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Image Upload Tests (POST /products/upload-images)
+  // ───────────────────────────────────────────────────────────────────────────
+  describe('Image Upload (POST /products/upload-images)', () => {
+    function makeMockFile(overrides: Partial<Express.Multer.File> = {}): Express.Multer.File {
+      return {
+        fieldname: 'images',
+        originalname: 'tile-sample.jpg',
+        encoding: '7bit',
+        mimetype: 'image/jpeg',
+        size: 50 * 1024,
+        buffer: Buffer.from('fake-image-bytes'),
+        stream: null as any,
+        destination: '',
+        filename: '',
+        path: '',
+        ...overrides,
+      };
+    }
+
+    it('36. OWNER uploads valid JPEG image successfully and returns metadata', async () => {
+      const file = makeMockFile({
+        originalname: 'floor-tile.jpeg',
+        mimetype: 'image/jpeg',
+      });
+      const mockUploadResult = [
+        {
+          url: 'https://res.cloudinary.com/demo/image/upload/v1/goverdhan-traders/products/floor-tile.jpg',
+          publicId: 'goverdhan-traders/products/floor-tile',
+          alt: 'floor-tile',
+        },
+      ];
+      cloudinaryService.uploadMultipleImages.mockResolvedValue(mockUploadResult);
+
+      const result = await controller.uploadImages([file]);
+      expect(result).toEqual(mockUploadResult);
+      expect(cloudinaryService.uploadMultipleImages).toHaveBeenCalledWith([file]);
+    });
+
+    it('37. OWNER uploads valid PNG image successfully', async () => {
+      const file = makeMockFile({
+        originalname: 'wall-tile.png',
+        mimetype: 'image/png',
+      });
+      const mockUploadResult = [
+        {
+          url: 'https://res.cloudinary.com/demo/image/upload/v1/goverdhan-traders/products/wall-tile.png',
+          publicId: 'goverdhan-traders/products/wall-tile',
+          alt: 'wall-tile',
+        },
+      ];
+      cloudinaryService.uploadMultipleImages.mockResolvedValue(mockUploadResult);
+
+      const result = await controller.uploadImages([file]);
+      expect(result).toEqual(mockUploadResult);
+      expect(result[0].url).toContain('.png');
+    });
+
+    it('38. OWNER uploads valid WEBP image successfully', async () => {
+      const file = makeMockFile({
+        originalname: 'modern-tile.webp',
+        mimetype: 'image/webp',
+      });
+      const mockUploadResult = [
+        {
+          url: 'https://res.cloudinary.com/demo/image/upload/v1/goverdhan-traders/products/modern-tile.webp',
+          publicId: 'goverdhan-traders/products/modern-tile',
+          alt: 'modern-tile',
+        },
+      ];
+      cloudinaryService.uploadMultipleImages.mockResolvedValue(mockUploadResult);
+
+      const result = await controller.uploadImages([file]);
+      expect(result).toEqual(mockUploadResult);
+      expect(result[0].url).toContain('.webp');
+    });
+
+    it('39. Rejects empty file list with BadRequestException', async () => {
+      await expect(controller.uploadImages([])).rejects.toThrow(BadRequestException);
+      await expect(controller.uploadImages(null as any)).rejects.toThrow(BadRequestException);
+    });
+
+    it('40. Rejects more than 5 files with BadRequestException', async () => {
+      const sixFiles = [
+        makeMockFile({ originalname: '1.jpg' }),
+        makeMockFile({ originalname: '2.jpg' }),
+        makeMockFile({ originalname: '3.jpg' }),
+        makeMockFile({ originalname: '4.jpg' }),
+        makeMockFile({ originalname: '5.jpg' }),
+        makeMockFile({ originalname: '6.jpg' }),
+      ];
+
+      await expect(controller.uploadImages(sixFiles)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('41. Product creation saves ImageReference[] metadata correctly', async () => {
+      const imageRef = {
+        url: 'https://res.cloudinary.com/demo/image/upload/v1/sample.jpg',
+        publicId: 'sample',
+        alt: 'Sample Tile',
+      };
+      const dto = {
+        brand: 'TileCo',
+        productName: 'Glazed Porcelain',
+        gallaNumber: 'GT-GLZ',
+        category: 'Porcelain',
+        size: '60x60',
+        finish: 'Glossy',
+        color: 'Ivory',
+        piecesPerBox: 4,
+        areaPerBox: 14.4,
+        purchasePrice: 400,
+        sellingPrice: 600,
+        minimumStockPieces: 8,
+        images: [imageRef],
+      };
+
+      const mockSavedProduct = makeProduct({ ...dto, images: [imageRef] });
+      productModel.create.mockResolvedValue(mockSavedProduct);
+      inventoryModel.create.mockResolvedValue({ _id: new Types.ObjectId(), productId: mockSavedProduct._id, totalPieces: 0 });
+
+      const created = await service.create(dto as any);
+      expect(created.images).toHaveLength(1);
+      expect(created.images[0].url).toBe(imageRef.url);
+      expect(created.images[0].publicId).toBe(imageRef.publicId);
+    });
+
+    it('42. Product update updates ImageReference[] metadata without affecting business logic', async () => {
+      const id = new Types.ObjectId().toHexString();
+      const existing = makeProduct({ _id: new Types.ObjectId(id), images: [] });
+      const newImages = [
+        {
+          url: 'https://res.cloudinary.com/demo/image/upload/v1/updated.jpg',
+          publicId: 'updated',
+          alt: 'Updated Alt',
+        },
+      ];
+
+      productModel.findById.mockReturnValue({ exec: jest.fn().mockResolvedValue(existing) });
+      productModel.findByIdAndUpdate.mockReturnValue({
+        exec: jest.fn().mockResolvedValue({ ...existing, images: newImages }),
+      });
+
+      const updated = await service.update(id, { images: newImages });
+      expect(updated.images).toEqual(newImages);
+      expect(productModel.findByIdAndUpdate).toHaveBeenCalledWith(
+        id,
+        { $set: { images: newImages } },
+        expect.anything(),
+      );
+    });
+
+    it('43. Existing product behavior unaffected when images are omitted', async () => {
+      const dto = {
+        brand: 'TileCo',
+        productName: 'Simple Tile',
+        gallaNumber: 'GT-SMP',
+        category: 'Ceramic',
+        size: '30x30',
+        finish: 'Matt',
+        color: 'Grey',
+        piecesPerBox: 8,
+        areaPerBox: 10,
+        purchasePrice: 200,
+        sellingPrice: 300,
+      };
+
+      const mockSaved = makeProduct({ ...dto, images: [] });
+      productModel.create.mockResolvedValue(mockSaved);
+      inventoryModel.create.mockResolvedValue({ _id: new Types.ObjectId() });
+
+      const created = await service.create(dto as any);
+      expect(created.images).toEqual([]);
     });
   });
 });
