@@ -7,11 +7,15 @@ import {
   Param,
   Query,
   UseGuards,
+  UseInterceptors,
+  UploadedFiles,
+  BadRequestException,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import { ProductsService, PaginatedProducts } from './products.service';
-import { CreateProductDto } from './dto/create-product.dto';
+import { CreateProductDto, ImageReferenceDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ListProductsDto } from './dto/list-products.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -33,6 +37,46 @@ import { ProductDocument } from './schemas/product.schema';
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
+
+  /**
+   * POST /products/upload-images
+   * Uploads up to 5 image files to Cloudinary and returns their ImageReference metadata.
+   * Restricted to OWNER role.
+   */
+  @Post('upload-images')
+  @Roles(UserRole.OWNER)
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(
+    FilesInterceptor('images', 5, {
+      limits: {
+        fileSize: 5 * 1024 * 1024, // 5MB per file
+        files: 5,
+      },
+      fileFilter: (req, file, cb) => {
+        const allowedMimes = ['image/jpeg', 'image/png', 'image/webp'];
+        if (!allowedMimes.includes(file.mimetype)) {
+          return cb(
+            new BadRequestException(
+              `Invalid file type: ${file.mimetype}. Only JPEG, PNG, and WebP images are allowed.`,
+            ),
+            false,
+          );
+        }
+        cb(null, true);
+      },
+    }),
+  )
+  async uploadImages(
+    @UploadedFiles() files: Express.Multer.File[],
+  ): Promise<ImageReferenceDto[]> {
+    if (!files || files.length === 0) {
+      throw new BadRequestException('At least one image file is required');
+    }
+    if (files.length > 5) {
+      throw new BadRequestException('Maximum 5 images can be uploaded per request');
+    }
+    return this.productsService.uploadImages(files);
+  }
 
   /**
    * POST /products

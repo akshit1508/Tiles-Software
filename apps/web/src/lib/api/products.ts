@@ -127,4 +127,12 @@ export const productsApi = {
   activate: (id: string): Promise<{ product: Product }> => {
     return api.patch<{ product: Product }>(`/products/${id}/activate`);
   },
+
+  uploadImages: (files: File[]): Promise<ImageReference[]> => {
+    const formData = new FormData();
+    files.forEach((file) => {
+      formData.append('images', file);
+    });
+    return api.post<ImageReference[]>('/products/upload-images', formData);
+  },
 };

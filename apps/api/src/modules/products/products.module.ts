@@ -1,10 +1,11 @@
-﻿import { Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Product, ProductSchema } from './schemas/product.schema';
 import { Inventory, InventorySchema } from '../inventory/schemas/inventory.schema';
 import { ProductsService } from './products.service';
 import { ProductsController } from './products.controller';
 import { AuthModule } from '../auth/auth.module';
+import { CloudinaryModule } from '../cloudinary/cloudinary.module';
 
 /**
  * ProductsModule — provides REST API for tile product master data.
@@ -22,6 +23,7 @@ import { AuthModule } from '../auth/auth.module';
       { name: Inventory.name, schema: InventorySchema },
     ]),
     AuthModule,
+    CloudinaryModule,
   ],
   controllers: [ProductsController],
   providers: [ProductsService],

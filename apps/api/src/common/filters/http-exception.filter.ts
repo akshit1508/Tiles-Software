@@ -18,16 +18,32 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const request = ctx.getRequest<Request>();
 
     const isHttpException = exception instanceof HttpException;
-    const status = isHttpException
+    const isMulterError =
+      exception &&
+      typeof exception === 'object' &&
+      (exception as Record<string, unknown>).name === 'MulterError';
+
+    let status = isHttpException
       ? exception.getStatus()
-      : HttpStatus.INTERNAL_SERVER_ERROR;
+      : isMulterError
+        ? HttpStatus.BAD_REQUEST
+        : HttpStatus.INTERNAL_SERVER_ERROR;
 
     const errorResponse = isHttpException ? exception.getResponse() : null;
 
     let message = 'Internal server error';
     let errors: any = null;
 
-    if (typeof errorResponse === 'string') {
+    if (isMulterError) {
+      const multerCode = (exception as Record<string, unknown>).code;
+      if (multerCode === 'LIMIT_FILE_SIZE') {
+        message = 'File size exceeds 5MB limit';
+      } else if (multerCode === 'LIMIT_FILE_COUNT' || multerCode === 'LIMIT_UNEXPECTED_FILE') {
+        message = 'Maximum 5 images allowed per upload request';
+      } else {
+        message = (exception as Error).message || 'File upload error';
+      }
+    } else if (typeof errorResponse === 'string') {
       message = errorResponse;
     } else if (errorResponse && typeof errorResponse === 'object') {
       const respObj = errorResponse as Record<string, any>;

@@ -1,29 +1,16 @@
-﻿import {
+import {
   IsString,
   IsNotEmpty,
   IsNumber,
   IsInt,
   IsOptional,
   IsArray,
+  ArrayMaxSize,
   ValidateNested,
-  IsUrl,
   Min,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
-
-class UpdateImageReferenceDto {
-  @IsUrl({}, { message: 'Image url must be a valid URL' })
-  @IsNotEmpty({ message: 'Image url is required' })
-  url: string;
-
-  @IsString()
-  @IsOptional()
-  publicId?: string;
-
-  @IsString()
-  @IsOptional()
-  alt?: string;
-}
+import { ImageReferenceDto } from './create-product.dto';
 
 /**
  * UpdateProductDto — validates fields that may be patched on an existing product.
@@ -126,8 +113,9 @@ export class UpdateProductDto {
   minimumStockPieces?: number;
 
   @IsArray({ message: 'images must be an array' })
+  @ArrayMaxSize(5, { message: 'images cannot contain more than 5 items' })
   @ValidateNested({ each: true })
-  @Type(() => UpdateImageReferenceDto)
+  @Type(() => ImageReferenceDto)
   @IsOptional()
-  images?: UpdateImageReferenceDto[];
+  images?: ImageReferenceDto[];
 }
