@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import * as path from 'path';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { DatabaseModule } from './database/database.module';
@@ -15,7 +16,14 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: ['.env.local', '.env'],
+      envFilePath: [
+        '.env.local',
+        '.env',
+        'apps/api/.env.local',
+        'apps/api/.env',
+        path.resolve(__dirname, '../../.env'),
+        path.resolve(__dirname, '../../../.env'),
+      ],
     }),
     DatabaseModule,
     AuthModule,

@@ -22,11 +22,12 @@ export function AdjustmentModal({
 }: AdjustmentModalProps) {
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [adjustmentType, setAdjustmentType] = useState<'SURPLUS' | 'SHRINKAGE'>('SURPLUS');
-  const [pieces, setPieces] = useState<string>('');
+  const [unit, setUnit] = useState<'BOX' | 'PIECE'>('BOX');
+  const [quantity, setQuantity] = useState<string>('');
   const [reason, setReason] = useState<string>('');
   const [fieldErrors, setFieldErrors] = useState<{
     productId?: string;
-    pieces?: string;
+    quantity?: string;
     reason?: string;
   }>({});
   const [serverError, setServerError] = useState<string | null>(null);
@@ -36,23 +37,27 @@ export function AdjustmentModal({
     if (isOpen) {
       setSelectedProductId(product?._id || (availableProducts[0]?._id ?? ''));
       setAdjustmentType('SURPLUS');
-      setPieces('');
+      setUnit('BOX');
+      setQuantity('');
       setReason('');
       setFieldErrors({});
       setServerError(null);
     }
   }, [isOpen, product, availableProducts]);
 
+  const activeProduct =
+    product || availableProducts.find((p) => p._id === selectedProductId);
+
   const validate = (): boolean => {
-    const errors: { productId?: string; pieces?: string; reason?: string } = {};
+    const errors: { productId?: string; quantity?: string; reason?: string } = {};
 
     if (!selectedProductId) {
       errors.productId = 'Please select a product';
     }
 
-    const count = parseInt(pieces, 10);
+    const count = parseInt(quantity, 10);
     if (isNaN(count) || count <= 0) {
-      errors.pieces = 'Adjustment pieces must be an integer greater than 0';
+      errors.quantity = `Adjustment ${unit === 'BOX' ? 'boxes' : 'pieces'} must be an integer greater than 0`;
     }
 
     if (!reason.trim()) {
@@ -69,15 +74,22 @@ export function AdjustmentModal({
 
     if (!validate()) return;
 
-    const count = parseInt(pieces, 10);
-    const signedPieces = adjustmentType === 'SHRINKAGE' ? -count : count;
+    const count = parseInt(quantity, 10);
+    const multiplier = unit === 'BOX' && activeProduct ? activeProduct.piecesPerBox : 1;
+    const pieceCount = count * multiplier;
+    const signedPieces = adjustmentType === 'SHRINKAGE' ? -pieceCount : pieceCount;
+
+    const formattedReason =
+      unit === 'BOX'
+        ? `${reason.trim()} (${adjustmentType === 'SURPLUS' ? '+' : '-'}${count} ${count === 1 ? 'box' : 'boxes'} = ${adjustmentType === 'SURPLUS' ? '+' : '-'}${pieceCount} pcs)`
+        : reason.trim();
 
     try {
       setIsSubmitting(true);
       await inventoryApi.adjustment({
         productId: selectedProductId,
         physicalPieces: signedPieces,
-        reason: reason.trim(),
+        reason: formattedReason,
       });
 
       onSuccess();
@@ -108,7 +120,7 @@ export function AdjustmentModal({
       isOpen={isOpen}
       onClose={onClose}
       title="Manual Stock Adjustment"
-      description="Correct inventory counts due to physical audit count reconciliations."
+      description="Add or delete/remove stock by complete boxes or loose pieces."
       size="md"
     >
       {serverError && (
@@ -145,48 +157,78 @@ export function AdjustmentModal({
             options={[
               { label: 'Select a tile product...', value: '' },
               ...availableProducts.map((p) => ({
-                label: `${p.productName} (${p.gallaNumber})`,
+                label: `${p.productName} (${p.gallaNumber}) — ${p.piecesPerBox} pcs/box`,
                 value: p._id,
               })),
             ]}
           />
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Select
-            label="Adjustment Type *"
+            label="Action Type *"
             value={adjustmentType}
             onChange={(e) => {
               setAdjustmentType(e.target.value as 'SURPLUS' | 'SHRINKAGE');
             }}
             disabled={isSubmitting}
             options={[
-              { label: '📈 Found Stock / Surplus (+)', value: 'SURPLUS' },
-              { label: '📉 Missing / Shrinkage (-)', value: 'SHRINKAGE' },
+              { label: '📈 Add Stock / Surplus (+)', value: 'SURPLUS' },
+              { label: '📉 Delete / Remove / Shrinkage (-)', value: 'SHRINKAGE' },
+            ]}
+          />
+
+          <Select
+            label="Stock Unit *"
+            value={unit}
+            onChange={(e) => {
+              setUnit(e.target.value as 'BOX' | 'PIECE');
+              setFieldErrors((prev) => ({ ...prev, quantity: undefined }));
+            }}
+            disabled={isSubmitting}
+            options={[
+              { label: '📦 Boxes (Complete)', value: 'BOX' },
+              { label: '🧩 Loose Pieces', value: 'PIECE' },
             ]}
           />
 
           <Input
-            label="Physical Pieces *"
+            label={unit === 'BOX' ? 'Quantity (Boxes) *' : 'Physical Pieces *'}
             type="number"
             min="1"
             step="1"
-            placeholder="e.g. 5"
-            value={pieces}
+            placeholder={unit === 'BOX' ? 'e.g. 5' : 'e.g. 20'}
+            value={quantity}
             onChange={(e) => {
-              setPieces(e.target.value);
-              setFieldErrors((prev) => ({ ...prev, pieces: undefined }));
+              setQuantity(e.target.value);
+              setFieldErrors((prev) => ({ ...prev, quantity: undefined }));
             }}
-            error={fieldErrors.pieces}
+            error={fieldErrors.quantity}
             helperText={
-              adjustmentType === 'SURPLUS'
-                ? 'Adds positive pieces to physical stock'
-                : 'Deducts pieces from physical stock'
+              unit === 'BOX'
+                ? `${adjustmentType === 'SURPLUS' ? 'Adds' : 'Deletes/removes'} complete boxes`
+                : `${adjustmentType === 'SURPLUS' ? 'Adds' : 'Deletes/removes'} individual loose pieces`
             }
             disabled={isSubmitting}
             required
           />
         </div>
+
+        {parseInt(quantity, 10) > 0 && unit === 'BOX' && activeProduct && (
+          <div className="rounded-lg border border-blue-200 bg-blue-50/70 p-3 text-xs text-blue-900">
+            <div className="font-semibold text-blue-950 flex items-center gap-1.5">
+              <span>📦 Box Stock Adjustment Conversion:</span>
+            </div>
+            <p className="mt-1 text-blue-800">
+              {adjustmentType === 'SURPLUS' ? 'Adding' : 'Deleting / Removing'}{' '}
+              <span className="font-bold">{parseInt(quantity, 10)} {parseInt(quantity, 10) === 1 ? 'box' : 'boxes'}</span> × {activeProduct.piecesPerBox} pcs/box ={' '}
+              <span className="font-bold font-mono text-blue-950">
+                {adjustmentType === 'SURPLUS' ? '+' : '-'}{parseInt(quantity, 10) * activeProduct.piecesPerBox} physical pieces
+              </span>{' '}
+              will be updated in canonical inventory stock.
+            </p>
+          </div>
+        )}
 
         {adjustmentType === 'SHRINKAGE' && (
           <div className="rounded-lg border border-amber-200 bg-amber-50/80 p-3 text-xs text-amber-900 flex items-start gap-2">

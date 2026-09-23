@@ -45,7 +45,8 @@ export function ProductTable({
               <div>Ref. Purchase Price</div>
               <div className="text-[10px] font-normal lowercase text-slate-400">per box</div>
             </TableHead>
-            <TableHead className="text-center">Min Stock</TableHead>
+            <TableHead className="text-center">Initial Stock</TableHead>
+            <TableHead className="text-center">Min Stock (Boxes)</TableHead>
             <TableHead className="text-center">Status</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
@@ -117,8 +118,14 @@ export function ProductTable({
                 </TableCell>
 
                 <TableCell className="text-center">
+                  <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-0.5 text-xs font-mono font-medium text-blue-700 border border-blue-200">
+                    {product.initialStockBoxes ?? product.incomingBoxes ?? 0} {((product.initialStockBoxes ?? product.incomingBoxes ?? 0) === 1 ? 'box' : 'boxes')}
+                  </span>
+                </TableCell>
+
+                <TableCell className="text-center">
                   <span className="text-xs font-medium text-slate-600">
-                    {product.minimumStockPieces} pcs
+                    {product.minimumStockBoxes ?? 0} {(product.minimumStockBoxes ?? 0) === 1 ? 'box' : 'boxes'}
                   </span>
                 </TableCell>
 

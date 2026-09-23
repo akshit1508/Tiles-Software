@@ -450,7 +450,27 @@ export class DashboardService {
         $match: {
           'product.isActive': true,
           $expr: {
-            $lte: ['$totalPieces', '$product.minimumStockPieces'],
+            $lte: [
+              '$totalPieces',
+              {
+                $multiply: [
+                  {
+                    $ifNull: [
+                      '$product.minimumStockBoxes',
+                      {
+                        $floor: {
+                          $divide: [
+                            { $ifNull: ['$product.minimumStockPieces', 0] },
+                            '$product.piecesPerBox',
+                          ],
+                        },
+                      },
+                    ],
+                  },
+                  '$product.piecesPerBox',
+                ],
+              },
+            ],
           },
         },
       },
@@ -461,7 +481,31 @@ export class DashboardService {
           productName: '$product.productName',
           brand: '$product.brand',
           currentPieces: '$totalPieces',
-          minimumStockPieces: '$product.minimumStockPieces',
+          piecesPerBox: '$product.piecesPerBox',
+          minimumStockBoxes: {
+            $ifNull: [
+              '$product.minimumStockBoxes',
+              {
+                $floor: {
+                  $divide: [
+                    { $ifNull: ['$product.minimumStockPieces', 0] },
+                    '$product.piecesPerBox',
+                  ],
+                },
+              },
+            ],
+          },
+          minimumStockPieces: {
+            $ifNull: [
+              '$product.minimumStockPieces',
+              {
+                $multiply: [
+                  { $ifNull: ['$product.minimumStockBoxes', 0] },
+                  '$product.piecesPerBox',
+                ],
+              },
+            ],
+          },
         },
       },
     ];
@@ -481,13 +525,26 @@ export class DashboardService {
       totalOutstanding: paiseToRupees(totalOutstandingPaise),
       lowStock: {
         totalLowStockProducts: lowStockItems.length,
-        items: lowStockItems.map((item) => ({
-          productId: item.productId.toString(),
-          productName: item.productName,
-          brand: item.brand,
-          currentPieces: item.currentPieces,
-          minimumStockPieces: item.minimumStockPieces,
-        })),
+        items: lowStockItems.map((item) => {
+          const piecesPerBox = item.piecesPerBox || 1;
+          const currentPieces = item.currentPieces || 0;
+          const fullBoxes = Math.floor(currentPieces / piecesPerBox);
+          const loosePieces = currentPieces % piecesPerBox;
+          const minimumStockBoxes = item.minimumStockBoxes ?? 0;
+
+          return {
+            productId: item.productId.toString(),
+            productName: item.productName,
+            brand: item.brand,
+            currentPieces,
+            fullBoxes,
+            loosePieces,
+            piecesPerBox,
+            minimumStockBoxes,
+            minimumStockPieces:
+              item.minimumStockPieces ?? minimumStockBoxes * piecesPerBox,
+          };
+        }),
       },
       dateFilter: hasDateFilter
         ? {

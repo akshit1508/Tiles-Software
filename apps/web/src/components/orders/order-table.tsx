@@ -8,9 +8,9 @@ import {
   TableCell,
   Button,
 } from '@/components/ui';
-import { Order } from '@/lib/api/orders';
+import { Order, getOrderPaymentStatus } from '@/lib/api/orders';
 import { formatCurrencyINR } from '@/lib/api/products';
-import { OrderStatusBadge } from './order-status-badge';
+import { OrderStatusBadge, OrderPaymentStatusBadge } from './order-status-badge';
 import { Eye, XCircle, Phone } from 'lucide-react';
 
 interface OrderTableProps {
@@ -126,9 +126,12 @@ export function OrderTable({
                   )}
                 </TableCell>
 
-                {/* Status Badge */}
+                {/* Status Badges */}
                 <TableCell className="text-center">
-                  <OrderStatusBadge status={order.status} />
+                  <div className="flex flex-col items-center gap-1">
+                    <OrderStatusBadge status={order.status} />
+                    <OrderPaymentStatusBadge status={getOrderPaymentStatus(order)} />
+                  </div>
                 </TableCell>
 
                 {/* Actions */}

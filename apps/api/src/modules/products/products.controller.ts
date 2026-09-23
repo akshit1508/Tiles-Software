@@ -21,6 +21,8 @@ import { ListProductsDto } from './dto/list-products.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { AuthenticatedUser } from '../auth/interfaces/auth.interface';
 import { UserRole } from '../../common/enums';
 import { ProductDocument } from './schemas/product.schema';
 
@@ -86,8 +88,11 @@ export class ProductsController {
   @Post()
   @Roles(UserRole.OWNER)
   @HttpCode(HttpStatus.CREATED)
-  async create(@Body() dto: CreateProductDto): Promise<{ product: ProductDocument }> {
-    const product = await this.productsService.create(dto);
+  async create(
+    @Body() dto: CreateProductDto,
+    @CurrentUser() user?: AuthenticatedUser,
+  ): Promise<{ product: ProductDocument }> {
+    const product = await this.productsService.create(dto, user?.id);
     return { product };
   }
 

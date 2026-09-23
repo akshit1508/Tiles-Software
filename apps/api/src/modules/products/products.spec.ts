@@ -43,8 +43,12 @@ import { Inventory } from '../inventory/schemas/inventory.schema';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { ROLES_KEY } from '../auth/decorators/roles.decorator';
-import { UserRole } from '../../common/enums';
+import { UserRole, InventoryTransactionType, SalesUnit } from '../../common/enums';
 import { CloudinaryService } from '../cloudinary';
+import { InventoryTransaction } from '../inventory/schemas/inventory-transaction.schema';
+import { CreateProductDto } from './dto/create-product.dto';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -69,7 +73,9 @@ function makeProduct(overrides: Record<string, unknown> = {}): Record<string, un
     areaPerBox: Types.Decimal128.fromString('14.4'),
     purchasePrice: Types.Decimal128.fromString('500'),
     sellingPrice: Types.Decimal128.fromString('700'),
-    minimumStockPieces: 10,
+    minimumStockBoxes: 2,
+    minimumStockPieces: 8,
+    incomingBoxes: 0,
     images: [],
     isActive: true,
     createdAt: new Date(),
@@ -99,6 +105,9 @@ describe('Products Module Unit Tests', () => {
   let inventoryModel: {
     create: jest.Mock;
   };
+  let transactionModel: {
+    create: jest.Mock;
+  };
   let cloudinaryService: {
     uploadImage: jest.Mock;
     uploadMultipleImages: jest.Mock;
@@ -119,6 +128,10 @@ describe('Products Module Unit Tests', () => {
       create: jest.fn(),
     };
 
+    transactionModel = {
+      create: jest.fn().mockResolvedValue({}),
+    };
+
     cloudinaryService = {
       uploadImage: jest.fn(),
       uploadMultipleImages: jest.fn(),
@@ -131,6 +144,7 @@ describe('Products Module Unit Tests', () => {
         ProductsService,
         { provide: getModelToken(Product.name), useValue: productModel },
         { provide: getModelToken(Inventory.name), useValue: inventoryModel },
+        { provide: getModelToken(InventoryTransaction.name), useValue: transactionModel },
         { provide: CloudinaryService, useValue: cloudinaryService },
       ],
     })
@@ -174,6 +188,351 @@ describe('Products Module Unit Tests', () => {
     expect(result._id).toBeDefined();
     expect(productModel.create).toHaveBeenCalledTimes(1);
     expect(inventoryModel.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('1b. calculates minimumStockPieces when minimumStockBoxes is provided', async () => {
+    const dto = {
+      brand: 'Somany',
+      productName: 'Tile X',
+      gallaNumber: 'GT-X01',
+      category: 'Floor',
+      size: '60x60',
+      finish: 'Polished',
+      color: 'White',
+      piecesPerBox: 4,
+      areaPerBox: 14.4,
+      purchasePrice: 500,
+      sellingPrice: 700,
+      minimumStockBoxes: 5,
+    };
+
+    const mockSavedProduct = makeProduct({
+      ...dto,
+      minimumStockBoxes: 5,
+      minimumStockPieces: 20,
+    });
+    productModel.create.mockResolvedValue(mockSavedProduct);
+    inventoryModel.create.mockResolvedValue({});
+
+    await service.create(dto as any);
+    expect(productModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        minimumStockBoxes: 5,
+        minimumStockPieces: 20,
+      }),
+    );
+  });
+
+  it('1c. initializes inventory totalPieces based on incomingBoxes * piecesPerBox', async () => {
+    const dto = {
+      brand: 'Kajaria',
+      productName: 'Tile Incoming',
+      gallaNumber: 'GT-IN01',
+      category: 'Floor',
+      size: '60x60',
+      finish: 'Polished',
+      color: 'White',
+      piecesPerBox: 4,
+      areaPerBox: 14.4,
+      purchasePrice: 500,
+      sellingPrice: 700,
+      incomingBoxes: 15,
+    };
+
+    const mockSavedProduct = makeProduct({
+      ...dto,
+      incomingBoxes: 15,
+    });
+    productModel.create.mockResolvedValue(mockSavedProduct);
+    inventoryModel.create.mockResolvedValue({ productId: mockSavedProduct._id, totalPieces: 60 });
+
+    await service.create(dto as any);
+    expect(productModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        incomingBoxes: 15,
+      }),
+    );
+    expect(inventoryModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        productId: mockSavedProduct._id,
+        totalPieces: 60,
+      }),
+    );
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Box-Only Initial Stock & Inventory Initialization Tests (Requirements 1-10)
+  // ───────────────────────────────────────────────────────────────────────────
+  describe('Box-Only Initial Stock & Inventory Initialization', () => {
+    it('1. Product can be created with initialStockBoxes = 50', async () => {
+      const dto = {
+        brand: 'Kajaria',
+        productName: 'Royal Slate',
+        gallaNumber: 'GT-RS50',
+        category: 'Floor',
+        size: '600x600',
+        finish: 'Matte',
+        color: 'Grey',
+        piecesPerBox: 4,
+        areaPerBox: 14.4,
+        purchasePrice: 480,
+        sellingPrice: 650,
+        initialStockBoxes: 50,
+      };
+
+      const mockSavedProduct = makeProduct({
+        ...dto,
+        initialStockBoxes: 50,
+        incomingBoxes: 50,
+      });
+      productModel.create.mockResolvedValue(mockSavedProduct);
+      inventoryModel.create.mockResolvedValue({ productId: mockSavedProduct._id, totalPieces: 200 });
+
+      const result = await service.create(dto as any);
+      expect(result).toBeDefined();
+      expect(productModel.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          initialStockBoxes: 50,
+          incomingBoxes: 50,
+        }),
+      );
+    });
+
+    it('2. Initial stock of 50 boxes is correctly initialized to 200 physical pieces (50 * 4)', async () => {
+      const dto = {
+        brand: 'Kajaria',
+        productName: 'Royal Slate',
+        gallaNumber: 'GT-RS50',
+        category: 'Floor',
+        size: '600x600',
+        finish: 'Matte',
+        color: 'Grey',
+        piecesPerBox: 4,
+        areaPerBox: 14.4,
+        purchasePrice: 480,
+        sellingPrice: 650,
+        initialStockBoxes: 50,
+      };
+
+      const mockSavedProduct = makeProduct({ ...dto });
+      productModel.create.mockResolvedValue(mockSavedProduct);
+      inventoryModel.create.mockResolvedValue({ productId: mockSavedProduct._id, totalPieces: 200 });
+
+      await service.create(dto as any);
+
+      // Verify canonical internal totalPieces is 50 * 4 = 200
+      expect(inventoryModel.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          productId: mockSavedProduct._id,
+          totalPieces: 200,
+        }),
+      );
+    });
+
+    it('3. Pieces Per Box = 4 does not require the user to enter 200 pieces (derived internally)', async () => {
+      const dto = {
+        brand: 'Somany',
+        productName: 'Elegance',
+        gallaNumber: 'GT-EL04',
+        category: 'Floor',
+        size: '600x600',
+        finish: 'Glossy',
+        color: 'Beige',
+        piecesPerBox: 4,
+        areaPerBox: 14.4,
+        purchasePrice: 400,
+        sellingPrice: 550,
+        initialStockBoxes: 50,
+        // Notice: user does NOT provide any piece quantity
+      };
+
+      const mockSavedProduct = makeProduct({ ...dto });
+      productModel.create.mockResolvedValue(mockSavedProduct);
+      inventoryModel.create.mockResolvedValue({ productId: mockSavedProduct._id, totalPieces: 200 });
+
+      await service.create(dto as any);
+
+      expect(inventoryModel.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          totalPieces: 200, // 50 boxes * 4 piecesPerBox
+        }),
+      );
+    });
+
+    it('4. Initial stock rejects decimals in CreateProductDto', async () => {
+      const target = plainToInstance(CreateProductDto, {
+        brand: 'Somany',
+        productName: 'Tile Dec',
+        gallaNumber: 'GT-DEC',
+        category: 'Floor',
+        size: '60x60',
+        finish: 'Polished',
+        color: 'White',
+        piecesPerBox: 4,
+        areaPerBox: 14.4,
+        purchasePrice: 500,
+        sellingPrice: 700,
+        initialStockBoxes: 50.5, // Decimal rejected
+      });
+
+      const errors = await validate(target);
+      const stockError = errors.find((e) => e.property === 'initialStockBoxes');
+      expect(stockError).toBeDefined();
+      expect(stockError?.constraints).toHaveProperty('isInt');
+    });
+
+    it('5. Initial stock rejects negative values in CreateProductDto', async () => {
+      const target = plainToInstance(CreateProductDto, {
+        brand: 'Somany',
+        productName: 'Tile Neg',
+        gallaNumber: 'GT-NEG',
+        category: 'Floor',
+        size: '60x60',
+        finish: 'Polished',
+        color: 'White',
+        piecesPerBox: 4,
+        areaPerBox: 14.4,
+        purchasePrice: 500,
+        sellingPrice: 700,
+        initialStockBoxes: -10, // Negative rejected
+      });
+
+      const errors = await validate(target);
+      const stockError = errors.find((e) => e.property === 'initialStockBoxes');
+      expect(stockError).toBeDefined();
+      expect(stockError?.constraints).toHaveProperty('min');
+    });
+
+    it('6. Initial stock rejects invalid non-numeric values in CreateProductDto', async () => {
+      const target = plainToInstance(CreateProductDto, {
+        brand: 'Somany',
+        productName: 'Tile Inv',
+        gallaNumber: 'GT-INV',
+        category: 'Floor',
+        size: '60x60',
+        finish: 'Polished',
+        color: 'White',
+        piecesPerBox: 4,
+        areaPerBox: 14.4,
+        purchasePrice: 500,
+        sellingPrice: 700,
+        initialStockBoxes: 'fifty' as any, // Non-numeric string rejected
+      });
+
+      const errors = await validate(target);
+      const stockError = errors.find((e) => e.property === 'initialStockBoxes');
+      expect(stockError).toBeDefined();
+      expect(stockError?.constraints).toHaveProperty('isInt');
+    });
+
+    it('7. Product creation does not create duplicate inventory (single authoritative source)', async () => {
+      const dto = {
+        brand: 'Kajaria',
+        productName: 'Single Inventory',
+        gallaNumber: 'GT-SI01',
+        category: 'Floor',
+        size: '600x600',
+        finish: 'Matte',
+        color: 'Grey',
+        piecesPerBox: 4,
+        areaPerBox: 14.4,
+        purchasePrice: 480,
+        sellingPrice: 650,
+        initialStockBoxes: 50,
+      };
+
+      const mockSavedProduct = makeProduct({ ...dto });
+      productModel.create.mockResolvedValue(mockSavedProduct);
+      inventoryModel.create.mockResolvedValue({ productId: mockSavedProduct._id, totalPieces: 200 });
+
+      await service.create(dto as any);
+
+      // Inventory collection created exactly once
+      expect(inventoryModel.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('8. Initial stock creates the appropriate STOCK_IN inventory transaction with BOX quantity', async () => {
+      const userId = new Types.ObjectId().toString();
+      const dto = {
+        brand: 'Kajaria',
+        productName: 'Audit Trail Tile',
+        gallaNumber: 'GT-AUD01',
+        category: 'Floor',
+        size: '600x600',
+        finish: 'Matte',
+        color: 'Grey',
+        piecesPerBox: 4,
+        areaPerBox: 14.4,
+        purchasePrice: 480,
+        sellingPrice: 650,
+        initialStockBoxes: 50,
+      };
+
+      const mockSavedProduct = makeProduct({ ...dto });
+      productModel.create.mockResolvedValue(mockSavedProduct);
+      inventoryModel.create.mockResolvedValue({ productId: mockSavedProduct._id, totalPieces: 200 });
+
+      await service.create(dto as any, userId);
+
+      expect(transactionModel.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          productId: mockSavedProduct._id,
+          transactionType: InventoryTransactionType.STOCK_IN,
+          physicalPieces: 200,
+          salesQuantity: Types.Decimal128.fromString('50'),
+          salesUnit: SalesUnit.BOX,
+          reason: 'Initial stock on product creation',
+          createdBy: new Types.ObjectId(userId),
+        }),
+      );
+    });
+
+    it('9. Editing an existing product does NOT reset or touch current inventory', async () => {
+      const mockExisting = makeProduct({ brand: 'OldBrand' });
+      productModel.findByIdAndUpdate.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(mockExisting),
+      });
+
+      // Update product with new brand and new price
+      await service.update(String(mockExisting._id), {
+        brand: 'NewBrand',
+        sellingPrice: 800,
+      });
+
+      // Inventory model was never touched during product update
+      expect(inventoryModel.create).not.toHaveBeenCalled();
+    });
+
+    it('10. Existing products without initial stock continue to work safely if they already exist (defaults to 0)', async () => {
+      const dto = {
+        brand: 'Kajaria',
+        productName: 'Legacy Product',
+        gallaNumber: 'GT-LEGACY',
+        category: 'Floor',
+        size: '600x600',
+        finish: 'Matte',
+        color: 'Grey',
+        piecesPerBox: 4,
+        areaPerBox: 14.4,
+        purchasePrice: 480,
+        sellingPrice: 650,
+        // initialStockBoxes omitted
+      };
+
+      const mockSavedProduct = makeProduct({ ...dto });
+      productModel.create.mockResolvedValue(mockSavedProduct);
+      inventoryModel.create.mockResolvedValue({ productId: mockSavedProduct._id, totalPieces: 0 });
+
+      const result = await service.create(dto as any);
+      expect(result).toBeDefined();
+      expect(inventoryModel.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          totalPieces: 0,
+        }),
+      );
+      // No STOCK_IN transaction logged for 0 initial stock
+      expect(transactionModel.create).not.toHaveBeenCalled();
+    });
   });
 
   // ───────────────────────────────────────────────────────────────────────────

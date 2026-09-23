@@ -108,8 +108,8 @@ export class Product {
   sellingPrice: Types.Decimal128;
 
   /**
-   * Minimum stock threshold in pieces.
-   * Product is considered "low stock" when inventory.totalPieces <= minimumStockPieces.
+   * Minimum stock threshold in complete boxes.
+   * Product is considered "low stock" when inventory.totalPieces <= (minimumStockBoxes * piecesPerBox).
    * Must be a non-negative integer.
    */
   @Prop({
@@ -119,10 +119,53 @@ export class Product {
     min: 0,
     validate: {
       validator: Number.isInteger,
-      message: 'minimumStockPieces must be a non-negative integer',
+      message: 'minimumStockBoxes must be a non-negative integer',
     },
   })
-  minimumStockPieces: number;
+  minimumStockBoxes: number;
+
+  /**
+   * Optional piece equivalent / legacy compatibility field.
+   */
+  @Prop({
+    type: Number,
+    required: false,
+    min: 0,
+  })
+  minimumStockPieces?: number;
+
+  /**
+   * Initial stock quantity in complete boxes at product creation time.
+   * Note: Current authoritative physical stock lives in the Inventory collection.
+   * Stored here as an immutable creation snapshot.
+   */
+  @Prop({
+    type: Number,
+    required: false,
+    default: 0,
+    min: 0,
+    validate: {
+      validator: Number.isInteger,
+      message: 'initialStockBoxes must be a non-negative integer',
+    },
+  })
+  initialStockBoxes?: number;
+
+  /**
+   * Number of boxes arriving / initially received for this product.
+   * Non-negative integer (default 0). Maintained for backward compatibility.
+   */
+  @Prop({
+    type: Number,
+    required: false,
+    default: 0,
+    min: 0,
+    validate: {
+      validator: Number.isInteger,
+      message: 'incomingBoxes must be a non-negative integer',
+    },
+  })
+  incomingBoxes?: number;
 
   /** External image references. Not binary blobs. */
   @Prop({

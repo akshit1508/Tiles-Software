@@ -107,6 +107,11 @@ export class UpdateProductDto {
   @IsOptional()
   sellingPrice?: number;
 
+  @IsInt({ message: 'minimumStockBoxes must be an integer' })
+  @Min(0, { message: 'minimumStockBoxes must be 0 or greater' })
+  @IsOptional()
+  minimumStockBoxes?: number;
+
   @IsInt({ message: 'minimumStockPieces must be an integer' })
   @Min(0, { message: 'minimumStockPieces must be 0 or greater' })
   @IsOptional()

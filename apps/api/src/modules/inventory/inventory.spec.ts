@@ -49,6 +49,7 @@ function makeMockProduct(overrides: Record<string, unknown> = {}) {
     areaPerBox: Types.Decimal128.fromString('15.5'),
     purchasePrice: Types.Decimal128.fromString('600'),
     sellingPrice: Types.Decimal128.fromString('850'),
+    minimumStockBoxes: 5,
     minimumStockPieces: 20,
     images: [],
     isActive: true,
@@ -186,7 +187,8 @@ describe('Inventory Module Unit Tests', () => {
       const mockProduct = makeMockProduct({
         piecesPerBox: 4,
         areaPerBox: Types.Decimal128.fromString('8'), // 8 / 4 = 2 sq.ft per piece
-        minimumStockPieces: 10,
+        minimumStockBoxes: 2, // 2 boxes = 8 pieces
+        minimumStockPieces: 8,
       });
       // 37 pieces: fullBoxes = floor(37/4)=9, loosePieces = 37%4=1, totalSqFt = 37*2=74
       const mockInventory = makeMockInventory(mockProduct._id, 37);
@@ -205,13 +207,15 @@ describe('Inventory Module Unit Tests', () => {
       expect(result.fullBoxes).toBe(9);
       expect(result.loosePieces).toBe(1);
       expect(result.totalSqFt).toBe(74);
-      expect(result.isLowStock).toBe(false); // 37 > 10
+      expect(result.minimumStockBoxes).toBe(2);
+      expect(result.isLowStock).toBe(false); // 37 > 8
     });
 
-    it('2. correctly marks isLowStock = true when totalPieces <= minimumStockPieces', async () => {
+    it('2. correctly marks isLowStock = true when totalPieces <= minimumStockBoxes * piecesPerBox', async () => {
       const mockProduct = makeMockProduct({
         piecesPerBox: 4,
         areaPerBox: Types.Decimal128.fromString('16'),
+        minimumStockBoxes: 5, // 5 boxes * 4 = 20 pieces
         minimumStockPieces: 20,
       });
       const mockInventory = makeMockInventory(mockProduct._id, 20); // exactly at threshold

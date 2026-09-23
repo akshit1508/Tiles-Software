@@ -167,6 +167,10 @@ describe('ProductSchema', () => {
   it('has minimumStockPieces as Number', () => {
     expect(ProductSchema.path('minimumStockPieces').instance).toBe('Number');
   });
+
+  it('has minimumStockBoxes as Number', () => {
+    expect(ProductSchema.path('minimumStockBoxes').instance).toBe('Number');
+  });
 });
 
 describe('InventorySchema', () => {

@@ -35,7 +35,7 @@ import {
   InventoryTransactionType,
   PaymentMethod,
 } from '../../common/enums';
-import { CreateOrderDto, CreateOrderItemDto, ListOrdersDto } from './dto';
+import { CreateOrderDto, CreateOrderItemDto, ListOrdersDto, InitialPaymentDto } from './dto';
 import { AuthenticatedUser } from '../auth/interfaces/auth.interface';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -214,6 +214,7 @@ describe('Orders Module Unit Tests', () => {
 
   let paymentModel: {
     find: jest.Mock;
+    create: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -260,6 +261,7 @@ describe('Orders Module Unit Tests', () => {
 
     paymentModel = {
       find: jest.fn().mockReturnValue(mockQuery([])),
+      create: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -1128,4 +1130,450 @@ describe('Orders Module Unit Tests', () => {
       expect(spy).toHaveBeenCalledWith(id, mockOwnerUser.id);
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Combined Sale + Initial Payment Workflow Tests
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('Combined Sale + Initial Payment Workflow', () => {
+    let mockCust: any;
+    let mockProd: any;
+    let mockInv: any;
+
+    beforeEach(() => {
+      mockCust = makeCustomer();
+      mockProd = makeProduct(); // 4 pcs/box, 600/box
+      mockInv = makeInventory(mockProd._id, 100);
+
+      customerModel.findById.mockReturnValue(mockQuery(mockCust));
+      productModel.find.mockReturnValue(mockQuery([mockProd]));
+      inventoryModel.find.mockReturnValue(mockQuery([mockInv]));
+      counterModel.findOneAndUpdate.mockResolvedValue({ seq: 1 });
+      inventoryModel.findOneAndUpdate.mockReturnValue(mockQuery(mockInv));
+      transactionModel.create.mockResolvedValue([]);
+      paymentModel.create.mockImplementation(async (docs: any[]) => {
+        return docs.map((d) => ({
+          ...d,
+          _id: makeObjectId(),
+          createdAt: new Date(),
+          toObject: function () {
+            return { ...this };
+          },
+        }));
+      });
+    });
+
+    it('creates sale with NO payment: paidAmount = 0, outstanding = total, UNPAID, no Payment created', async () => {
+      const orderDoc = makeOrder({
+        customerId: mockCust._id,
+        items: [
+          {
+            productId: mockProd._id,
+            productNameSnapshot: mockProd.productName,
+            brandSnapshot: mockProd.brand,
+            salesQuantity: Types.Decimal128.fromString('2'),
+            salesUnit: SalesUnit.BOX,
+            physicalPieces: 8,
+            unitPrice: Types.Decimal128.fromString('600.00'),
+            lineTotal: Types.Decimal128.fromString('1200.00'),
+          },
+        ],
+        subtotal: Types.Decimal128.fromString('1200.00'),
+        totalAmount: Types.Decimal128.fromString('1200.00'),
+      });
+      orderModel.create.mockResolvedValue([orderDoc]);
+
+      const dto: CreateOrderDto = {
+        customerId: mockCust._id.toString(),
+        items: [
+          {
+            productId: mockProd._id.toString(),
+            quantityBoxes: 2,
+            salesUnit: SalesUnit.BOX,
+          },
+        ],
+        paidNow: 0,
+      };
+
+      const result = await service.create(dto, mockOwnerUser.id);
+
+      expect(result.totalAmount).toBe(1200);
+      expect(result.paidAmount).toBe(0);
+      expect(result.outstandingAmount).toBe(1200);
+      expect(result.paymentStatus).toBe('UNPAID');
+      expect(paymentModel.create).not.toHaveBeenCalled();
+      expect(mockSession.commitTransaction).toHaveBeenCalled();
+    });
+
+    it('creates sale with FULL payment: paidAmount = total, outstanding = 0, PAID, Payment created atomically', async () => {
+      const orderDoc = makeOrder({
+        customerId: mockCust._id,
+        items: [
+          {
+            productId: mockProd._id,
+            productNameSnapshot: mockProd.productName,
+            brandSnapshot: mockProd.brand,
+            salesQuantity: Types.Decimal128.fromString('2'),
+            salesUnit: SalesUnit.BOX,
+            physicalPieces: 8,
+            unitPrice: Types.Decimal128.fromString('600.00'),
+            lineTotal: Types.Decimal128.fromString('1200.00'),
+          },
+        ],
+        subtotal: Types.Decimal128.fromString('1200.00'),
+        totalAmount: Types.Decimal128.fromString('1200.00'),
+      });
+      orderModel.create.mockResolvedValue([orderDoc]);
+
+      const dto: CreateOrderDto = {
+        customerId: mockCust._id.toString(),
+        items: [
+          {
+            productId: mockProd._id.toString(),
+            quantityBoxes: 2,
+            unitPrice: 600,
+          },
+        ],
+        initialPayment: {
+          amount: 1200,
+          paymentMethod: PaymentMethod.CASH,
+          notes: 'Paid in cash at shop',
+        },
+      };
+
+      const result = await service.create(dto, mockOwnerUser.id);
+
+      expect(result.totalAmount).toBe(1200);
+      expect(result.paidAmount).toBe(1200);
+      expect(result.outstandingAmount).toBe(0);
+      expect(result.paymentStatus).toBe('PAID');
+      expect(paymentModel.create).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({
+            customerId: mockCust._id,
+            orderId: orderDoc._id,
+            paymentMethod: PaymentMethod.CASH,
+            notes: 'Paid in cash at shop',
+          }),
+        ],
+        { session: mockSession },
+      );
+      expect(result.payments).toHaveLength(1);
+    });
+
+    it('creates sale with PARTIAL payment: paidAmount = 500, outstanding = 700, PARTIALLY PAID', async () => {
+      const orderDoc = makeOrder({
+        customerId: mockCust._id,
+        items: [
+          {
+            productId: mockProd._id,
+            productNameSnapshot: mockProd.productName,
+            brandSnapshot: mockProd.brand,
+            salesQuantity: Types.Decimal128.fromString('2'),
+            salesUnit: SalesUnit.BOX,
+            physicalPieces: 8,
+            unitPrice: Types.Decimal128.fromString('600.00'),
+            lineTotal: Types.Decimal128.fromString('1200.00'),
+          },
+        ],
+        subtotal: Types.Decimal128.fromString('1200.00'),
+        totalAmount: Types.Decimal128.fromString('1200.00'),
+      });
+      orderModel.create.mockResolvedValue([orderDoc]);
+
+      const dto: CreateOrderDto = {
+        customerId: mockCust._id.toString(),
+        items: [
+          {
+            productId: mockProd._id.toString(),
+            quantityBoxes: 2,
+          },
+        ],
+        initialPayment: {
+          amount: 500,
+          paymentMethod: PaymentMethod.UPI,
+        },
+      };
+
+      const result = await service.create(dto, mockOwnerUser.id);
+
+      expect(result.totalAmount).toBe(1200);
+      expect(result.paidAmount).toBe(500);
+      expect(result.outstandingAmount).toBe(700);
+      expect(result.paymentStatus).toBe('PARTIALLY PAID');
+      expect(paymentModel.create).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({
+            customerId: mockCust._id,
+            orderId: orderDoc._id,
+            paymentMethod: PaymentMethod.UPI,
+          }),
+        ],
+        { session: mockSession },
+      );
+    });
+
+    it('rejects overpayment where initial payment exceeds total amount', async () => {
+      const dto: CreateOrderDto = {
+        customerId: mockCust._id.toString(),
+        items: [
+          {
+            productId: mockProd._id.toString(),
+            quantityBoxes: 2, // 2 * 600 = 1200
+          },
+        ],
+        initialPayment: {
+          amount: 1500, // Exceeds 1200
+          paymentMethod: PaymentMethod.CASH,
+        },
+      };
+
+      await expect(service.create(dto, mockOwnerUser.id)).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.create(dto, mockOwnerUser.id)).rejects.toThrow(
+        'Payment cannot exceed order total.',
+      );
+      expect(mockSession.abortTransaction).toHaveBeenCalled();
+    });
+
+    it('rejects negative payment amount', async () => {
+      const dto: CreateOrderDto = {
+        customerId: mockCust._id.toString(),
+        items: [
+          {
+            productId: mockProd._id.toString(),
+            quantityBoxes: 1,
+          },
+        ],
+        paidNow: -100,
+      };
+
+      await expect(service.create(dto, mockOwnerUser.id)).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.create(dto, mockOwnerUser.id)).rejects.toThrow(
+        'Payment amount cannot be negative',
+      );
+    });
+
+    it('requires paymentMethod when payment amount > 0', async () => {
+      const dto: CreateOrderDto = {
+        customerId: mockCust._id.toString(),
+        items: [
+          {
+            productId: mockProd._id.toString(),
+            quantityBoxes: 1,
+          },
+        ],
+        initialPayment: {
+          amount: 300,
+          // paymentMethod omitted
+        },
+      };
+
+      await expect(service.create(dto, mockOwnerUser.id)).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.create(dto, mockOwnerUser.id)).rejects.toThrow(
+        'Payment method is required when payment amount is greater than 0',
+      );
+    });
+
+    it('allows omitting paymentMethod when payment amount is 0', async () => {
+      const orderDoc = makeOrder({
+        customerId: mockCust._id,
+        items: [
+          {
+            productId: mockProd._id,
+            productNameSnapshot: mockProd.productName,
+            brandSnapshot: mockProd.brand,
+            salesQuantity: Types.Decimal128.fromString('1'),
+            salesUnit: SalesUnit.BOX,
+            physicalPieces: 4,
+            unitPrice: Types.Decimal128.fromString('600.00'),
+            lineTotal: Types.Decimal128.fromString('600.00'),
+          },
+        ],
+        subtotal: Types.Decimal128.fromString('600.00'),
+        totalAmount: Types.Decimal128.fromString('600.00'),
+      });
+      orderModel.create.mockResolvedValue([orderDoc]);
+
+      const dto: CreateOrderDto = {
+        customerId: mockCust._id.toString(),
+        items: [
+          {
+            productId: mockProd._id.toString(),
+            quantityBoxes: 1,
+          },
+        ],
+        initialPayment: {
+          amount: 0,
+        },
+      };
+
+      const result = await service.create(dto, mockOwnerUser.id);
+      expect(result.paidAmount).toBe(0);
+      expect(paymentModel.create).not.toHaveBeenCalled();
+    });
+
+    it('supports flat paidNow and paymentMethod parameters', async () => {
+      const orderDoc = makeOrder({
+        customerId: mockCust._id,
+        items: [
+          {
+            productId: mockProd._id,
+            productNameSnapshot: mockProd.productName,
+            brandSnapshot: mockProd.brand,
+            salesQuantity: Types.Decimal128.fromString('2'),
+            salesUnit: SalesUnit.BOX,
+            physicalPieces: 8,
+            unitPrice: Types.Decimal128.fromString('600.00'),
+            lineTotal: Types.Decimal128.fromString('1200.00'),
+          },
+        ],
+        subtotal: Types.Decimal128.fromString('1200.00'),
+        totalAmount: Types.Decimal128.fromString('1200.00'),
+      });
+      orderModel.create.mockResolvedValue([orderDoc]);
+
+      const dto: CreateOrderDto = {
+        customerId: mockCust._id.toString(),
+        items: [
+          {
+            productId: mockProd._id.toString(),
+            quantityBoxes: 2,
+          },
+        ],
+        paidNow: 600,
+        paymentMethod: PaymentMethod.BANK_TRANSFER,
+        paymentNotes: 'NEFT Ref #12345',
+      };
+
+      const result = await service.create(dto, mockOwnerUser.id);
+      expect(result.paidAmount).toBe(600);
+      expect(result.outstandingAmount).toBe(600);
+      expect(result.paymentStatus).toBe('PARTIALLY PAID');
+      expect(paymentModel.create).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({
+            paymentMethod: PaymentMethod.BANK_TRANSFER,
+            notes: 'NEFT Ref #12345',
+          }),
+        ],
+        { session: mockSession },
+      );
+    });
+
+    it('aborts transaction and rolls back if payment creation fails', async () => {
+      const orderDoc = makeOrder();
+      orderModel.create.mockResolvedValue([orderDoc]);
+      paymentModel.create.mockRejectedValue(new Error('Payment DB write failed'));
+
+      const dto: CreateOrderDto = {
+        customerId: mockCust._id.toString(),
+        items: [
+          {
+            productId: mockProd._id.toString(),
+            quantityBoxes: 1,
+          },
+        ],
+        initialPayment: {
+          amount: 600,
+          paymentMethod: PaymentMethod.CASH,
+        },
+      };
+
+      await expect(service.create(dto, mockOwnerUser.id)).rejects.toThrow(
+        'Payment DB write failed',
+      );
+      expect(mockSession.abortTransaction).toHaveBeenCalled();
+    });
+
+    it('aborts transaction and rolls back if inventory deduction fails (concurrent update)', async () => {
+      inventoryModel.findOneAndUpdate.mockReturnValue(mockQuery(null)); // concurrent conflict
+
+      const dto: CreateOrderDto = {
+        customerId: mockCust._id.toString(),
+        items: [
+          {
+            productId: mockProd._id.toString(),
+            quantityBoxes: 1,
+          },
+        ],
+        paidNow: 600,
+        paymentMethod: PaymentMethod.CASH,
+      };
+
+      await expect(service.create(dto, mockOwnerUser.id)).rejects.toThrow(
+        'Concurrent inventory update prevented order completion. Please retry.',
+      );
+      expect(orderModel.create).not.toHaveBeenCalled();
+      expect(paymentModel.create).not.toHaveBeenCalled();
+      expect(mockSession.abortTransaction).toHaveBeenCalled();
+    });
+
+    it('BOX-only: correctly defaults salesUnit to BOX when omitted', async () => {
+      const orderDoc = makeOrder();
+      orderModel.create.mockResolvedValue([orderDoc]);
+
+      const dto: CreateOrderDto = {
+        customerId: mockCust._id.toString(),
+        items: [
+          {
+            productId: mockProd._id.toString(),
+            quantityBoxes: 3,
+            // salesUnit omitted
+          },
+        ],
+      };
+
+      await service.create(dto, mockOwnerUser.id);
+
+      // Verify that 3 boxes * 4 pcs/box = 12 pieces was deducted from inventory
+      expect(inventoryModel.findOneAndUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          totalPieces: { $gte: 12 },
+        }),
+        expect.objectContaining({
+          $inc: { totalPieces: -12 },
+        }),
+        expect.anything(),
+      );
+    });
+
+    describe('InitialPaymentDto Validation', () => {
+      it('validates a correct InitialPaymentDto', async () => {
+        const dto = plainToInstance(InitialPaymentDto, {
+          amount: 500.5,
+          paymentMethod: PaymentMethod.UPI,
+          paymentDate: '2026-09-23T10:00:00.000Z',
+          notes: 'Advance token',
+        });
+        const errors = await validate(dto);
+        expect(errors).toHaveLength(0);
+      });
+
+      it('rejects negative amount in InitialPaymentDto', async () => {
+        const dto = plainToInstance(InitialPaymentDto, {
+          amount: -50,
+        });
+        const errors = await validate(dto);
+        expect(errors.length).toBeGreaterThan(0);
+        expect(errors[0].property).toBe('amount');
+      });
+
+      it('rejects invalid paymentMethod enum in InitialPaymentDto', async () => {
+        const dto = plainToInstance(InitialPaymentDto, {
+          amount: 50,
+          paymentMethod: 'BITCOIN',
+        });
+        const errors = await validate(dto);
+        expect(errors.length).toBeGreaterThan(0);
+        expect(errors[0].property).toBe('paymentMethod');
+      });
+    });
+  });
 });
+

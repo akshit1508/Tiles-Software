@@ -213,6 +213,15 @@ export function InventoryHistoryModal({
                               pcs
                             </span>
                           </span>
+                          {product?.piecesPerBox && Math.abs(tx.physicalPieces) >= product.piecesPerBox && (
+                            <div className="text-[10px] font-normal text-slate-500 font-sans">
+                              {isPositive ? '+' : '-'}
+                              {Math.floor(Math.abs(tx.physicalPieces) / product.piecesPerBox)}{' '}
+                              {Math.floor(Math.abs(tx.physicalPieces) / product.piecesPerBox) === 1 ? 'box' : 'boxes'}
+                              {Math.abs(tx.physicalPieces) % product.piecesPerBox > 0 &&
+                                ` + ${Math.abs(tx.physicalPieces) % product.piecesPerBox} pcs`}
+                            </div>
+                          )}
                         </TableCell>
 
                         <TableCell className="text-xs text-slate-700">

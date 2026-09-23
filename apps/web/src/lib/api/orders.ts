@@ -1,7 +1,9 @@
 import { api } from './client';
+import { PaymentMethod } from './payments';
 
 export type OrderStatus = 'COMPLETED' | 'CANCELLED';
 export type SalesUnit = 'BOX' | 'PIECE' | 'SQ_FT';
+export type OrderPaymentStatus = 'PAID' | 'PARTIALLY PAID' | 'UNPAID' | 'CANCELLED';
 
 export interface OrderItem {
   productId: string;
@@ -33,6 +35,7 @@ export interface Order {
   status: OrderStatus;
   paidAmount: number;
   outstandingAmount: number;
+  paymentStatus?: OrderPaymentStatus;
   payments?: any[];
   createdBy: string | Record<string, unknown>;
   createdAt: string;
@@ -41,14 +44,28 @@ export interface Order {
 
 export interface CreateOrderItemInput {
   productId: string;
-  salesQuantity: number;
-  salesUnit: SalesUnit;
+  /** Box quantity for the BOX-only sales workflow */
+  quantityBoxes?: number;
+  /** Sold quantity (backward compatible) */
+  salesQuantity?: number;
+  salesUnit?: SalesUnit;
   unitPrice?: number;
+}
+
+export interface InitialPaymentInput {
+  amount: number;
+  paymentMethod?: PaymentMethod;
+  notes?: string;
+  paymentDate?: string;
 }
 
 export interface CreateOrderInput {
   customerId: string;
   items: CreateOrderItemInput[];
+  initialPayment?: InitialPaymentInput;
+  paidNow?: number;
+  paymentMethod?: PaymentMethod;
+  paymentNotes?: string;
 }
 
 export interface ListOrdersQuery {
@@ -67,6 +84,23 @@ export interface PaginatedOrders {
   page: number;
   limit: number;
   totalPages: number;
+}
+
+/**
+ * Derives the payment status display for an order if not provided directly.
+ */
+export function getOrderPaymentStatus(order: {
+  status: OrderStatus;
+  paidAmount?: number;
+  totalAmount: number;
+  paymentStatus?: OrderPaymentStatus;
+}): OrderPaymentStatus {
+  if (order.paymentStatus) return order.paymentStatus;
+  if (order.status === 'CANCELLED') return 'CANCELLED';
+  const paid = order.paidAmount || 0;
+  if (paid >= order.totalAmount && order.totalAmount > 0) return 'PAID';
+  if (paid > 0) return 'PARTIALLY PAID';
+  return 'UNPAID';
 }
 
 export const ordersApi = {
@@ -95,7 +129,8 @@ export const ordersApi = {
   },
 
   /**
-   * Atomically creates an order in COMPLETED status, validating and deducting physical inventory.
+   * Atomically creates an order in COMPLETED status, validating and deducting physical inventory,
+   * with optional initial payment.
    */
   create: (data: CreateOrderInput): Promise<Order> => {
     return api.post<Order>('/orders', data);

@@ -6,6 +6,7 @@ export interface RequestOptions extends Omit<RequestInit, 'method' | 'body'> {
   method?: HttpMethod;
   body?: unknown;
   params?: Record<string, string | number | boolean | undefined | null>;
+  timeout?: number;
 }
 
 /**
@@ -69,6 +70,10 @@ export async function apiClient<T>(
     }
   }
 
+  const timeoutMs = options.timeout ?? 5000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
     const response = await fetch(url, {
       ...options,
@@ -77,7 +82,9 @@ export async function apiClient<T>(
       body,
       // IMPORTANT: credentials: 'include' ensures HttpOnly cookies are attached across origins
       credentials: 'include',
+      signal: options.signal || controller.signal,
     });
+    clearTimeout(timer);
 
     // Handle 204 No Content
     if (response.status === 204) {
@@ -104,6 +111,7 @@ export async function apiClient<T>(
 
     return data as T;
   } catch (error) {
+    clearTimeout(timer);
     if (error instanceof ApiError) {
       throw error;
     }
@@ -113,7 +121,9 @@ export async function apiClient<T>(
       statusCode: 0,
       message:
         error instanceof Error
-          ? error.message
+          ? error.name === 'AbortError'
+            ? 'Request timed out. The server took too long to respond.'
+            : error.message
           : 'Unable to connect to the server. Please check your internet connection or try again later.',
     });
   }

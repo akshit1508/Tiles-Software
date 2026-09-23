@@ -69,7 +69,19 @@ export function DashboardLowStockTable({
           </TableHeader>
           <TableBody>
             {items.map((item) => {
-              const deficit = Math.max(0, item.minimumStockPieces - item.currentPieces);
+              const ppb = item.piecesPerBox || 1;
+              const rawMinPieces = item.minimumStockPieces ?? 0;
+              const minBoxes =
+                item.minimumStockBoxes ?? (item.piecesPerBox ? Math.ceil(rawMinPieces / item.piecesPerBox) : 0);
+              const minPieces =
+                item.piecesPerBox && item.minimumStockBoxes !== undefined
+                  ? item.minimumStockBoxes * item.piecesPerBox
+                  : rawMinPieces;
+              const fullBoxes = item.fullBoxes ?? Math.floor(item.currentPieces / ppb);
+              const loosePieces = item.loosePieces ?? (item.currentPieces % ppb);
+              const deficitPieces = Math.max(0, minPieces - item.currentPieces);
+              const deficitBoxes = item.piecesPerBox ? Math.ceil(deficitPieces / item.piecesPerBox) : 0;
+
               return (
                 <TableRow key={item.productId} className="hover:bg-slate-50/50">
                   <TableCell>
@@ -80,16 +92,29 @@ export function DashboardLowStockTable({
                   <TableCell className="text-xs text-slate-600">
                     {item.brand}
                   </TableCell>
-                  <TableCell className="text-right font-mono text-xs font-bold text-rose-600">
-                    {item.currentPieces} pcs
+                  <TableCell className="text-right">
+                    <div className="font-mono text-xs font-bold text-rose-600">
+                      {fullBoxes} {fullBoxes === 1 ? 'box' : 'boxes'}
+                    </div>
+                    <div className="text-[10px] text-slate-500 font-normal">
+                      +{loosePieces} loose ({item.currentPieces} pcs)
+                    </div>
                   </TableCell>
-                  <TableCell className="text-right font-mono text-xs text-slate-600">
-                    {item.minimumStockPieces} pcs
+                  <TableCell className="text-right">
+                    <div className="font-mono text-xs font-semibold text-slate-700">
+                      {minBoxes} {minBoxes === 1 ? 'box' : 'boxes'}
+                    </div>
+                    <div className="text-[10px] text-slate-400 font-normal">
+                      ({minPieces} pcs)
+                    </div>
                   </TableCell>
                   <TableCell className="text-right">
                     <Badge variant="danger" size="sm">
-                      -{deficit} pcs
+                      -{deficitBoxes} {deficitBoxes === 1 ? 'box' : 'boxes'}
                     </Badge>
+                    <div className="text-[10px] text-slate-400 mt-0.5">
+                      -{deficitPieces} pcs
+                    </div>
                   </TableCell>
                   <TableCell className="text-right">
                     <Link

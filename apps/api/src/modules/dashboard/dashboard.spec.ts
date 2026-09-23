@@ -503,6 +503,10 @@ describe('Dashboard & Outstanding Module Unit Tests', () => {
             brand: 'Kajaria',
             currentPieces: 10,
             minimumStockPieces: 20,
+            piecesPerBox: 4,
+            minimumStockBoxes: 5,
+            fullBoxes: 2,
+            loosePieces: 2,
           },
         ]),
       );
@@ -523,6 +527,9 @@ describe('Dashboard & Outstanding Module Unit Tests', () => {
       expect(summary.lowStock.items[0].productName).toBe(
         'Kajaria White 600x600',
       );
+      expect(summary.lowStock.items[0].minimumStockBoxes).toBe(5);
+      expect(summary.lowStock.items[0].fullBoxes).toBe(2);
+      expect(summary.lowStock.items[0].loosePieces).toBe(2);
     });
 
     it('filters dashboard metrics with date range using exclusive upper bound ($lt next day)', async () => {

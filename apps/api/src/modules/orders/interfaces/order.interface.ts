@@ -19,6 +19,8 @@ export interface OrderCustomerInfo {
   isActive?: boolean;
 }
 
+export type OrderPaymentStatus = 'PAID' | 'PARTIALLY PAID' | 'UNPAID' | 'CANCELLED';
+
 export interface OrderDetailResponse {
   _id: string;
   orderNumber: string;
@@ -30,6 +32,7 @@ export interface OrderDetailResponse {
   status: OrderStatus;
   paidAmount: number;
   outstandingAmount: number;
+  paymentStatus: OrderPaymentStatus;
   payments?: any[];
   createdBy: string | Record<string, unknown>;
   createdAt: Date;

@@ -4,6 +4,7 @@ import {
   Button,
   Input,
   Select,
+  SearchableSelect,
 } from '@/components/ui';
 import {
   Payment,
@@ -89,8 +90,7 @@ export function PaymentFormModal({
   };
 
   // When an order is chosen from dropdown, fetch its freshest authoritative details
-  const handleOrderChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const orderId = e.target.value;
+  const handleOrderSelect = async (orderId: string) => {
     setSelectedOrderId(orderId);
     setError(null);
 
@@ -184,32 +184,43 @@ export function PaymentFormModal({
 
         {/* 1. Order Association */}
         <div className="space-y-2">
-          <label className="block text-sm font-medium text-slate-900">
-            Select Order <span className="text-rose-500">*</span>
-          </label>
           {initialOrder ? (
-            <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
-              <div className="flex items-center justify-between">
-                <span className="font-mono text-sm font-bold text-blue-700">
-                  {initialOrder.orderNumber}
-                </span>
-                <span className="text-xs text-slate-500">
-                  Linked Order
-                </span>
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5">
+                Select Order <span className="text-rose-500">*</span>
+              </label>
+              <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-sm font-bold text-blue-700">
+                    {initialOrder.orderNumber}
+                  </span>
+                  <span className="text-xs text-slate-500">
+                    Linked Order
+                  </span>
+                </div>
               </div>
             </div>
           ) : (
-            <Select
+            <SearchableSelect
+              label="Select Order *"
               value={selectedOrderId}
-              onChange={handleOrderChange}
+              onChange={handleOrderSelect}
               disabled={isLoadingOrders || isSubmitting}
-              options={[
-                { value: '', label: isLoadingOrders ? 'Loading orders...' : '— Select an order —' },
-                ...orders.map((o) => ({
-                  value: o._id,
-                  label: `${o.orderNumber} — ${o.customer?.name || 'Customer'} [Pending: ${formatCurrencyINR(o.outstandingAmount)}]`,
-                })),
-              ]}
+              isLoading={isLoadingOrders}
+              loadingText="Loading orders..."
+              placeholder="Search by order number or customer name..."
+              emptyText="No matching orders found"
+              options={orders.map((o) => ({
+                value: o._id,
+                label: o.orderNumber,
+                sublabel: `${o.customer?.name || 'Customer'}${o.customer?.phone ? ` (${o.customer.phone})` : ''}`,
+                tag: o.outstandingAmount > 0 ? `Pending: ${formatCurrencyINR(o.outstandingAmount)}` : 'Fully Paid',
+                searchTerms: [
+                  o.orderNumber,
+                  o.customer?.name || '',
+                  o.customer?.phone || '',
+                ],
+              }))}
             />
           )}
         </div>

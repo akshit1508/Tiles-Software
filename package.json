@@ -8,6 +8,8 @@
     "apps/web"
   ],
   "scripts": {
+    "dev": "concurrently -k -p \"[{name}]\" -n \"API,WEB\" -c \"blue,green\" \"npm run dev:api\" \"npm run dev:web\"",
+    "start": "npm run dev",
     "dev:api": "npm run start:dev --workspace=apps/api",
     "dev:web": "npm run dev --workspace=apps/web",
     "build:api": "npm run build --workspace=apps/api",
@@ -18,9 +20,13 @@
     "lint:web": "npm run lint --workspace=apps/web",
     "lint": "npm run lint:api && npm run lint:web",
     "test:api": "npm run test --workspace=apps/api",
+    "test:web": "npm run test --workspace=apps/web",
     "seed:admin": "npm run seed:admin --workspace=apps/api"
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5"
   }
 }

@@ -1,4 +1,4 @@
-﻿import {
+import {
   Injectable,
   NotFoundException,
   BadRequestException,
@@ -90,7 +90,27 @@ export class InventoryService {
       pipeline.push({
         $match: {
           $expr: {
-            $lte: ['$totalPieces', '$product.minimumStockPieces'],
+            $lte: [
+              '$totalPieces',
+              {
+                $multiply: [
+                  {
+                    $ifNull: [
+                      '$product.minimumStockBoxes',
+                      {
+                        $floor: {
+                          $divide: [
+                            { $ifNull: ['$product.minimumStockPieces', 0] },
+                            '$product.piecesPerBox',
+                          ],
+                        },
+                      },
+                    ],
+                  },
+                  '$product.piecesPerBox',
+                ],
+              },
+            ],
           },
         },
       });
@@ -118,6 +138,7 @@ export class InventoryService {
         fullBoxes: derived.fullBoxes,
         loosePieces: derived.loosePieces,
         totalSqFt: derived.totalSqFt,
+        minimumStockBoxes: derived.minimumStockBoxes,
         isLowStock: derived.isLowStock,
         createdAt: item.createdAt,
         updatedAt: item.updatedAt,
@@ -167,6 +188,7 @@ export class InventoryService {
       fullBoxes: derived.fullBoxes,
       loosePieces: derived.loosePieces,
       totalSqFt: derived.totalSqFt,
+      minimumStockBoxes: derived.minimumStockBoxes,
       isLowStock: derived.isLowStock,
       createdAt: (inventory as any).createdAt,
       updatedAt: (inventory as any).updatedAt,
@@ -245,6 +267,7 @@ export class InventoryService {
       fullBoxes: derived.fullBoxes,
       loosePieces: derived.loosePieces,
       totalSqFt: derived.totalSqFt,
+      minimumStockBoxes: derived.minimumStockBoxes,
       isLowStock: derived.isLowStock,
       createdAt: (updatedInventory as any).createdAt,
       updatedAt: (updatedInventory as any).updatedAt,
@@ -342,6 +365,7 @@ export class InventoryService {
       fullBoxes: derived.fullBoxes,
       loosePieces: derived.loosePieces,
       totalSqFt: derived.totalSqFt,
+      minimumStockBoxes: derived.minimumStockBoxes,
       isLowStock: derived.isLowStock,
       createdAt: (updatedInventory as any).createdAt,
       updatedAt: (updatedInventory as any).updatedAt,
@@ -459,6 +483,7 @@ export class InventoryService {
       fullBoxes: derived.fullBoxes,
       loosePieces: derived.loosePieces,
       totalSqFt: derived.totalSqFt,
+      minimumStockBoxes: derived.minimumStockBoxes,
       isLowStock: derived.isLowStock,
       createdAt: (updatedInventory as any).createdAt,
       updatedAt: (updatedInventory as any).updatedAt,
@@ -561,13 +586,22 @@ export class InventoryService {
     const areaPerPiece = areaPerBox / piecesPerBox;
     const totalSqFt =
       Math.round(totalPieces * areaPerPiece * 10000) / 10000;
-    const isLowStock = totalPieces <= (product.minimumStockPieces ?? 0);
+
+    const minimumStockBoxes =
+      product.minimumStockBoxes !== undefined
+        ? product.minimumStockBoxes
+        : product.minimumStockPieces !== undefined
+          ? Math.floor(product.minimumStockPieces / piecesPerBox)
+          : 0;
+
+    const isLowStock = totalPieces <= minimumStockBoxes * piecesPerBox;
 
     return {
       fullBoxes,
       loosePieces,
       totalSqFt,
       isLowStock,
+      minimumStockBoxes,
     };
   }
 

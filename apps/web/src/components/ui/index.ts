@@ -10,3 +10,4 @@ export * from './empty-state';
 export * from './loading-state';
 export * from './error-state';
 export * from './confirm-dialog';
+export * from './searchable-select';

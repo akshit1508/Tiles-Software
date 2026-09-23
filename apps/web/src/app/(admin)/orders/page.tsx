@@ -104,7 +104,11 @@ export default function OrdersPage() {
 
   const handleCreateSuccess = (createdOrder: Order) => {
     setSuccessMessage(
-      `Order ${createdOrder.orderNumber} created successfully in COMPLETED status. Physical inventory deducted.`,
+      `Sale ${createdOrder.orderNumber} created successfully.${
+        createdOrder.paidAmount > 0
+          ? ` Initial payment of ${formatCurrencyINR(createdOrder.paidAmount)} recorded.`
+          : ''
+      }`,
     );
     fetchOrders();
   };
@@ -283,6 +287,10 @@ export default function OrdersPage() {
         onCancelOrder={(order) => {
           setSelectedOrderForDetails(null);
           setSelectedOrderForCancel(order);
+        }}
+        onPaymentSuccess={() => {
+          setSuccessMessage('Payment recorded successfully.');
+          fetchOrders();
         }}
       />
 

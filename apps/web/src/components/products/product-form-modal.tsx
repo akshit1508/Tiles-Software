@@ -33,7 +33,8 @@ interface FormState {
   areaPerBox: string;
   purchasePrice: string;
   sellingPrice: string;
-  minimumStockPieces: string;
+  minimumStockBoxes: string;
+  initialStockBoxes: string;
 }
 
 const initialFormState: FormState = {
@@ -48,7 +49,8 @@ const initialFormState: FormState = {
   areaPerBox: '14.4',
   purchasePrice: '0',
   sellingPrice: '0',
-  minimumStockPieces: '0',
+  minimumStockBoxes: '0',
+  initialStockBoxes: '',
 };
 
 export function ProductFormModal({
@@ -85,7 +87,11 @@ export function ProductFormModal({
         areaPerBox: String(parseDecimalValue(product.areaPerBox)),
         purchasePrice: String(parseDecimalValue(product.purchasePrice)),
         sellingPrice: String(parseDecimalValue(product.sellingPrice)),
-        minimumStockPieces: String(product.minimumStockPieces ?? 0),
+        minimumStockBoxes: String(
+          product.minimumStockBoxes ??
+            Math.floor((product.minimumStockPieces ?? 0) / (product.piecesPerBox || 1)),
+        ),
+        initialStockBoxes: String(product.initialStockBoxes ?? product.incomingBoxes ?? 0),
       });
       setImages(product.images || []);
     } else {
@@ -184,9 +190,22 @@ export function ProductFormModal({
       errors.sellingPrice = 'Selling price must be >= 0';
     }
 
-    const minStock = parseInt(form.minimumStockPieces, 10);
+    const minStock = parseInt(form.minimumStockBoxes, 10);
     if (isNaN(minStock) || minStock < 0) {
-      errors.minimumStockPieces = 'Minimum stock must be >= 0';
+      errors.minimumStockBoxes = 'Minimum stock (boxes) must be >= 0';
+    }
+
+    if (!isEdit) {
+      if (!form.initialStockBoxes.trim()) {
+        errors.initialStockBoxes = 'Initial stock (boxes) is required';
+      } else {
+        const initBoxes = Number(form.initialStockBoxes);
+        if (isNaN(initBoxes) || !Number.isInteger(initBoxes)) {
+          errors.initialStockBoxes = 'Initial stock must be a whole integer (boxes)';
+        } else if (initBoxes < 0) {
+          errors.initialStockBoxes = 'Initial stock cannot be negative';
+        }
+      }
     }
 
     setFieldErrors(errors);
@@ -202,6 +221,10 @@ export function ProductFormModal({
     try {
       setIsSubmitting(true);
 
+      const minBoxes = parseInt(form.minimumStockBoxes, 10) || 0;
+      const initBoxes = !isEdit ? (parseInt(form.initialStockBoxes, 10) || 0) : 0;
+      const pieces = parseInt(form.piecesPerBox, 10);
+
       const payload: CreateProductInput = {
         brand: form.brand.trim(),
         productName: form.productName.trim(),
@@ -210,16 +233,21 @@ export function ProductFormModal({
         size: form.size.trim(),
         finish: form.finish.trim(),
         color: form.color.trim(),
-        piecesPerBox: parseInt(form.piecesPerBox, 10),
+        piecesPerBox: pieces,
         areaPerBox: parseFloat(form.areaPerBox),
         purchasePrice: parseFloat(form.purchasePrice),
         sellingPrice: parseFloat(form.sellingPrice),
-        minimumStockPieces: parseInt(form.minimumStockPieces, 10) || 0,
+        minimumStockBoxes: minBoxes,
+        minimumStockPieces: minBoxes * pieces,
+        initialStockBoxes: initBoxes,
+        incomingBoxes: initBoxes,
         images,
       };
 
       if (isEdit && product) {
-        const updatePayload: UpdateProductInput = { ...payload, images };
+        // Exclude initialStockBoxes and incomingBoxes so editing never overwrites current inventory
+        const { initialStockBoxes, incomingBoxes, ...restPayload } = payload;
+        const updatePayload: UpdateProductInput = { ...restPayload, images };
         await productsApi.update(product._id, updatePayload);
       } else {
         await productsApi.create(payload);
@@ -385,7 +413,53 @@ export function ProductFormModal({
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {!isEdit ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Input
+                label="Initial Stock (Boxes) *"
+                type="number"
+                min="0"
+                step="1"
+                placeholder="50"
+                value={form.initialStockBoxes}
+                onChange={(e) => handleChange('initialStockBoxes', e.target.value)}
+                error={fieldErrors.initialStockBoxes}
+                helperText="Number of complete boxes currently available in the shop."
+                disabled={isSubmitting}
+                required
+              />
+
+              <Input
+                label="Minimum Stock (Boxes)"
+                type="number"
+                min="0"
+                step="1"
+                placeholder="0"
+                value={form.minimumStockBoxes}
+                onChange={(e) => handleChange('minimumStockBoxes', e.target.value)}
+                error={fieldErrors.minimumStockBoxes}
+                helperText="Low stock alert threshold in full boxes"
+                disabled={isSubmitting}
+              />
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Input
+                label="Minimum Stock (Boxes)"
+                type="number"
+                min="0"
+                step="1"
+                placeholder="0"
+                value={form.minimumStockBoxes}
+                onChange={(e) => handleChange('minimumStockBoxes', e.target.value)}
+                error={fieldErrors.minimumStockBoxes}
+                helperText="Low stock alert threshold in full boxes"
+                disabled={isSubmitting}
+              />
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
               label="Selling Price (₹ / Box) *"
               type="number"
@@ -412,19 +486,6 @@ export function ProductFormModal({
               helperText="Catalog reference purchase price per box"
               disabled={isSubmitting}
               required
-            />
-
-            <Input
-              label="Minimum Stock (Pieces)"
-              type="number"
-              min="0"
-              step="1"
-              placeholder="0"
-              value={form.minimumStockPieces}
-              onChange={(e) => handleChange('minimumStockPieces', e.target.value)}
-              error={fieldErrors.minimumStockPieces}
-              helperText="Low stock alert threshold"
-              disabled={isSubmitting}
             />
           </div>
         </div>

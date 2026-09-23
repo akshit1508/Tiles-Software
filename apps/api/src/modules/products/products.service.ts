@@ -4,11 +4,17 @@ import {
   ConflictException,
   BadRequestException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Product, ProductDocument } from './schemas/product.schema';
 import { Inventory, InventoryDocument } from '../inventory/schemas/inventory.schema';
+import {
+  InventoryTransaction,
+  InventoryTransactionDocument,
+} from '../inventory/schemas/inventory-transaction.schema';
+import { InventoryTransactionType, SalesUnit } from '../../common/enums';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ListProductsDto } from './dto/list-products.dto';
@@ -32,13 +38,20 @@ export class ProductsService {
   constructor(
     @InjectModel(Product.name) private readonly productModel: Model<ProductDocument>,
     @InjectModel(Inventory.name) private readonly inventoryModel: Model<InventoryDocument>,
-    private readonly cloudinaryService: CloudinaryService,
+    @Optional()
+    @InjectModel(InventoryTransaction.name)
+    private readonly transactionModel?: Model<InventoryTransactionDocument>,
+    @Optional()
+    private readonly cloudinaryService?: CloudinaryService,
   ) {}
 
   /**
    * Uploads multiple product images to Cloudinary via CloudinaryService.
    */
   async uploadImages(files: Express.Multer.File[]): Promise<UploadedImageResult[]> {
+    if (!this.cloudinaryService) {
+      throw new BadRequestException('CloudinaryService is not available');
+    }
     return this.cloudinaryService.uploadMultipleImages(files);
   }
 
@@ -47,14 +60,33 @@ export class ProductsService {
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Creates a new product and initializes its associated Inventory document
-   * with totalPieces = 0 (per API.md contract).
+   * Creates a new tile product master record and initializes its corresponding
+   * Inventory document based on initialStockBoxes * piecesPerBox.
    *
-   * gallaNumber is normalized (trim + uppercase) before persistence and must
-   * be unique across all products.
+   * If initialStockBoxes > 0, also records an initial STOCK_IN inventory transaction
+   * for an immutable audit trail.
    */
-  async create(dto: CreateProductDto): Promise<ProductDocument> {
+  async create(dto: CreateProductDto, userId?: string): Promise<ProductDocument> {
     const normalizedGallaNumber = dto.gallaNumber.trim().toUpperCase();
+
+    const minimumStockBoxes =
+      dto.minimumStockBoxes !== undefined
+        ? dto.minimumStockBoxes
+        : dto.minimumStockPieces !== undefined
+          ? Math.floor(dto.minimumStockPieces / dto.piecesPerBox)
+          : 0;
+    const minimumStockPieces =
+      dto.minimumStockPieces !== undefined
+        ? dto.minimumStockPieces
+        : minimumStockBoxes * dto.piecesPerBox;
+
+    const initialStockBoxes =
+      dto.initialStockBoxes !== undefined
+        ? Math.max(0, dto.initialStockBoxes)
+        : dto.incomingBoxes !== undefined
+          ? Math.max(0, dto.incomingBoxes)
+          : 0;
+    const initialTotalPieces = initialStockBoxes * dto.piecesPerBox;
 
     // Prepare Decimal128 monetary/area values
     const productData = {
@@ -69,7 +101,10 @@ export class ProductsService {
       areaPerBox: Types.Decimal128.fromString(String(dto.areaPerBox)),
       purchasePrice: Types.Decimal128.fromString(String(dto.purchasePrice)),
       sellingPrice: Types.Decimal128.fromString(String(dto.sellingPrice)),
-      minimumStockPieces: dto.minimumStockPieces ?? 0,
+      minimumStockBoxes,
+      minimumStockPieces,
+      initialStockBoxes,
+      incomingBoxes: initialStockBoxes,
       images: dto.images ?? [],
       isActive: true,
     };
@@ -82,14 +117,32 @@ export class ProductsService {
       throw err; // re-throw if not handled
     }
 
-    // Initialize inventory with totalPieces = 0 (API.md contract)
+    // Initialize authoritative inventory with totalPieces derived from initialStockBoxes * piecesPerBox
     try {
       await this.inventoryModel.create({
         productId: product._id,
-        totalPieces: 0,
+        totalPieces: initialTotalPieces,
       });
+
+      // Record immutable STOCK_IN transaction if initialStockBoxes > 0 and transactionModel is available
+      if (this.transactionModel && initialStockBoxes > 0) {
+        const userObjectId =
+          userId && Types.ObjectId.isValid(userId)
+            ? new Types.ObjectId(userId)
+            : new Types.ObjectId();
+
+        await this.transactionModel.create({
+          productId: product._id,
+          transactionType: InventoryTransactionType.STOCK_IN,
+          physicalPieces: initialTotalPieces,
+          salesQuantity: Types.Decimal128.fromString(String(initialStockBoxes)),
+          salesUnit: SalesUnit.BOX,
+          reason: 'Initial stock on product creation',
+          createdBy: userObjectId,
+        });
+      }
     } catch (inventoryErr: unknown) {
-      // If inventory creation fails, we must clean up the product to avoid orphaned records.
+      // If inventory or transaction creation fails, clean up the product to avoid orphaned records
       this.logger.error(
         `Failed to initialize inventory for product ${product._id.toString()}, rolling back product creation.`,
       );
@@ -187,7 +240,17 @@ export class ProductsService {
     if (dto.finish !== undefined) updateData['finish'] = dto.finish;
     if (dto.color !== undefined) updateData['color'] = dto.color;
     if (dto.piecesPerBox !== undefined) updateData['piecesPerBox'] = dto.piecesPerBox;
-    if (dto.minimumStockPieces !== undefined) updateData['minimumStockPieces'] = dto.minimumStockPieces;
+    if (dto.minimumStockBoxes !== undefined) {
+      updateData['minimumStockBoxes'] = dto.minimumStockBoxes;
+      if (dto.piecesPerBox !== undefined) {
+        updateData['minimumStockPieces'] = dto.minimumStockBoxes * dto.piecesPerBox;
+      }
+    } else if (dto.minimumStockPieces !== undefined) {
+      updateData['minimumStockPieces'] = dto.minimumStockPieces;
+      if (dto.piecesPerBox !== undefined) {
+        updateData['minimumStockBoxes'] = Math.floor(dto.minimumStockPieces / dto.piecesPerBox);
+      }
+    }
     if (dto.images !== undefined) updateData['images'] = dto.images;
 
     // Decimal128 conversions for monetary/area fields

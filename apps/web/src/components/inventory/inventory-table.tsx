@@ -39,12 +39,12 @@ export function InventoryTable({
             <TableHead>Galla No.</TableHead>
             <TableHead>Size / Finish</TableHead>
             <TableHead className="text-right">
-              <div>Total Physical Stock</div>
-              <div className="text-[10px] font-normal lowercase text-slate-400">canonical pieces</div>
+              <div>Current Stock</div>
+              <div className="text-[10px] font-normal lowercase text-slate-400">boxes & loose pcs</div>
             </TableHead>
             <TableHead className="text-right">
-              <div>Derived Packaging</div>
-              <div className="text-[10px] font-normal lowercase text-slate-400">boxes + loose pcs</div>
+              <div>Total Physical Stock</div>
+              <div className="text-[10px] font-normal lowercase text-slate-400">canonical pieces</div>
             </TableHead>
             <TableHead className="text-right">
               <div>Area Coverage</div>
@@ -107,19 +107,24 @@ export function InventoryTable({
                   </div>
                 </TableCell>
 
-                {/* Canonical Total Pieces */}
-                <TableCell className="text-right font-mono text-sm font-bold text-slate-900">
-                  {item.totalPieces.toLocaleString('en-IN')}{' '}
-                  <span className="text-xs font-normal text-slate-500 font-sans">pcs</span>
-                </TableCell>
-
-                {/* Derived Boxes + Loose */}
+                {/* Primary: Boxes + Loose Pieces */}
                 <TableCell className="text-right">
-                  <div className="text-xs font-semibold text-slate-800">
+                  <div className="font-mono text-sm font-bold text-slate-900">
                     {item.fullBoxes} {item.fullBoxes === 1 ? 'box' : 'boxes'}
                   </div>
-                  <div className="text-[11px] text-slate-500">
-                    +{item.loosePieces} loose {item.loosePieces === 1 ? 'pc' : 'pcs'}
+                  <div className="text-[11px] font-medium text-slate-500">
+                    {item.loosePieces > 0 ? `+${item.loosePieces} loose pcs` : '0 loose pcs'}
+                  </div>
+                </TableCell>
+
+                {/* Canonical Total Pieces */}
+                <TableCell className="text-right font-mono text-xs font-semibold text-slate-700">
+                  <div>
+                    {item.totalPieces.toLocaleString('en-IN')}{' '}
+                    <span className="text-[11px] font-normal text-slate-500 font-sans">pcs total</span>
+                  </div>
+                  <div className="text-[10px] font-normal text-slate-400 font-sans">
+                    {product.piecesPerBox} pcs/box
                   </div>
                 </TableCell>
 
@@ -141,8 +146,9 @@ export function InventoryTable({
                       isLowStock={item.isLowStock}
                       totalPieces={item.totalPieces}
                     />
-                    <span className="text-[10px] text-slate-400">
-                      min: {product.minimumStockPieces} pcs
+                    <span className="text-[10px] font-medium text-slate-500">
+                      min: {item.minimumStockBoxes ?? product.minimumStockBoxes ?? 0}{' '}
+                      {(item.minimumStockBoxes ?? product.minimumStockBoxes ?? 0) === 1 ? 'box' : 'boxes'}
                     </span>
                   </div>
                 </TableCell>

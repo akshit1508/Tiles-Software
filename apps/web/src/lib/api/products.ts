@@ -19,7 +19,10 @@ export interface Product {
   areaPerBox: number | string | { $numberDecimal: string };
   purchasePrice: number | string | { $numberDecimal: string };
   sellingPrice: number | string | { $numberDecimal: string };
-  minimumStockPieces: number;
+  minimumStockBoxes: number;
+  minimumStockPieces?: number;
+  initialStockBoxes?: number;
+  incomingBoxes?: number;
   images: ImageReference[];
   isActive: boolean;
   createdAt: string;
@@ -54,7 +57,10 @@ export interface CreateProductInput {
   areaPerBox: number;
   purchasePrice: number;
   sellingPrice: number;
+  minimumStockBoxes?: number;
   minimumStockPieces?: number;
+  initialStockBoxes?: number;
+  incomingBoxes?: number;
   images?: ImageReference[];
 }
 
@@ -70,6 +76,7 @@ export interface UpdateProductInput {
   areaPerBox?: number;
   purchasePrice?: number;
   sellingPrice?: number;
+  minimumStockBoxes?: number;
   minimumStockPieces?: number;
   images?: ImageReference[];
 }

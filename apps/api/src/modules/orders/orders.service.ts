@@ -21,6 +21,7 @@ import {
   OrderDetailResponse,
   OrderItemResponse,
   PaginatedOrdersResponse,
+  OrderPaymentStatus,
 } from './interfaces';
 import {
   InventoryTransactionType,
@@ -107,12 +108,41 @@ export class OrdersService {
       throw new BadRequestException('An order must contain at least one item');
     }
 
+    // Resolve payment intent
+    const initialPaymentAmount =
+      dto.initialPayment?.amount !== undefined
+        ? dto.initialPayment.amount
+        : dto.paidNow !== undefined
+          ? dto.paidNow
+          : 0;
+
+    const paymentMethod =
+      dto.initialPayment?.paymentMethod || dto.paymentMethod;
+
+    const paymentDate =
+      dto.initialPayment?.paymentDate || new Date().toISOString();
+
+    const paymentNotes =
+      dto.initialPayment?.notes || dto.paymentNotes;
+
+    const paidNowPaise = toPaise(initialPaymentAmount);
+
+    if (paidNowPaise < 0) {
+      throw new BadRequestException('Payment amount cannot be negative');
+    }
+
+    if (paidNowPaise > 0 && !paymentMethod) {
+      throw new BadRequestException(
+        'Payment method is required when payment amount is greater than 0',
+      );
+    }
+
     const productIds = dto.items.map((item) =>
       this.validateObjectId(item.productId, 'productId'),
     );
 
     // Execute authoritative validations and persistence within transaction boundary
-    const { orderDoc, customerDoc } = await this.runInTransaction(
+    const { orderDoc, customerDoc, paymentDoc } = await this.runInTransaction(
       async (session) => {
         // 1. Authoritative Customer Validation within transaction boundary
         const customer = await this.customerModel
@@ -172,51 +202,59 @@ export class OrdersService {
             );
           }
 
+          const rawQuantity = item.quantityBoxes ?? item.salesQuantity;
+          if (rawQuantity === undefined || rawQuantity === null || rawQuantity <= 0) {
+            throw new BadRequestException(
+              'salesQuantity must be positive',
+            );
+          }
+
+          const salesUnit = item.salesUnit ?? SalesUnit.BOX;
           const piecesPerBox = product.piecesPerBox;
           const areaPerBox = parseFloat(product.areaPerBox.toString());
           let physicalPieces: number;
 
           // Unit and piece validation according to salesUnit
-          switch (item.salesUnit) {
+          switch (salesUnit) {
             case SalesUnit.BOX: {
-              if (!Number.isInteger(item.salesQuantity) || item.salesQuantity <= 0) {
+              if (!Number.isInteger(rawQuantity) || rawQuantity <= 0) {
                 throw new BadRequestException(
-                  `salesQuantity for BOX sales must be a positive integer, received: ${item.salesQuantity}`,
+                  `salesQuantity for BOX sales must be a positive integer, received: ${rawQuantity}`,
                 );
               }
-              physicalPieces = item.salesQuantity * piecesPerBox;
+              physicalPieces = rawQuantity * piecesPerBox;
               const currentBoxes = requiredBoxesByProduct.get(prodIdStr) ?? 0;
               requiredBoxesByProduct.set(
                 prodIdStr,
-                currentBoxes + item.salesQuantity,
+                currentBoxes + rawQuantity,
               );
               break;
             }
 
             case SalesUnit.PIECE: {
-              if (!Number.isInteger(item.salesQuantity) || item.salesQuantity <= 0) {
+              if (!Number.isInteger(rawQuantity) || rawQuantity <= 0) {
                 throw new BadRequestException(
-                  `salesQuantity for PIECE sales must be a positive integer, received: ${item.salesQuantity}`,
+                  `salesQuantity for PIECE sales must be a positive integer, received: ${rawQuantity}`,
                 );
               }
-              physicalPieces = item.salesQuantity;
+              physicalPieces = rawQuantity;
               break;
             }
 
             case SalesUnit.SQ_FT: {
-              if (item.salesQuantity <= 0) {
+              if (rawQuantity <= 0) {
                 throw new BadRequestException(
-                  `salesQuantity for SQ_FT sales must be positive, received: ${item.salesQuantity}`,
+                  `salesQuantity for SQ_FT sales must be positive, received: ${rawQuantity}`,
                 );
               }
               const areaPerPiece = areaPerBox / piecesPerBox;
-              const pieces = item.salesQuantity / areaPerPiece;
+              const pieces = rawQuantity / areaPerPiece;
               const roundedPieces = Math.round(pieces);
 
               // Validation tolerance for tiles (cannot cut tiles)
               if (Math.abs(pieces - roundedPieces) > 1e-4) {
                 throw new BadRequestException(
-                  `Requested ${item.salesQuantity} sq.ft does not correspond to a whole number of tiles. Each tile is ${areaPerPiece} sq.ft.`,
+                  `Requested ${rawQuantity} sq.ft does not correspond to a whole number of tiles. Each tile is ${areaPerPiece} sq.ft.`,
                 );
               }
               physicalPieces = roundedPieces;
@@ -225,7 +263,7 @@ export class OrdersService {
 
             default:
               throw new BadRequestException(
-                `Unsupported sales unit: ${item.salesUnit}`,
+                `Unsupported sales unit: ${salesUnit}`,
               );
           }
 
@@ -242,7 +280,7 @@ export class OrdersService {
             unitPrice = paiseToRupees(Math.round(item.unitPrice * 100));
           } else {
             // Authoritative derivation from product.sellingPrice
-            switch (item.salesUnit) {
+            switch (salesUnit) {
               case SalesUnit.BOX:
                 unitPrice = paiseToRupees(Math.round(sellingPriceBox * 100));
                 break;
@@ -260,15 +298,15 @@ export class OrdersService {
           }
 
           const unitPricePaise = Math.round(unitPrice * 100);
-          const lineTotalPaise = Math.round(item.salesQuantity * unitPricePaise);
+          const lineTotalPaise = Math.round(rawQuantity * unitPricePaise);
           const lineTotal = paiseToRupees(lineTotalPaise);
 
           preparedItems.push({
             productId: product._id,
             productNameSnapshot: product.productName,
             brandSnapshot: product.brand,
-            salesQuantity: item.salesQuantity,
-            salesUnit: item.salesUnit,
+            salesQuantity: rawQuantity,
+            salesUnit,
             physicalPieces,
             unitPrice,
             unitPricePaise,
@@ -319,6 +357,14 @@ export class OrdersService {
         );
         const subtotal = paiseToRupees(subtotalPaise);
         const totalAmount = subtotal; // In V1 totalAmount equals subtotal
+        const totalAmountPaise = subtotalPaise;
+
+        // Authoritative overpayment rejection
+        if (paidNowPaise > totalAmountPaise) {
+          throw new BadRequestException(
+            'Payment cannot exceed order total.',
+          );
+        }
 
         // 7. Generate Atomic Order Number (DECISIONS.md ADR-013)
         const now = new Date();
@@ -393,13 +439,42 @@ export class OrdersService {
           createdBy: userObjectId,
         }));
 
-        await this.transactionModel.create(transactions, { session });
+        await this.transactionModel.create(transactions, {
+          session,
+          ordered: true,
+        });
 
-        return { orderDoc, customerDoc: customer };
+        // 11. Record Optional Atomic Initial Payment
+        let paymentDoc: PaymentDocument | null = null;
+        if (paidNowPaise > 0) {
+          const paymentData = {
+            customerId: customer._id,
+            orderId: orderDoc._id,
+            amount: Types.Decimal128.fromString(
+              paiseToRupees(paidNowPaise).toFixed(2),
+            ),
+            paymentMethod: paymentMethod!,
+            paymentDate: new Date(paymentDate),
+            notes: paymentNotes?.trim() || undefined,
+            createdBy: userObjectId,
+          };
+
+          const [createdPayment] = await this.paymentModel.create([paymentData], {
+            session,
+          });
+          paymentDoc = createdPayment;
+        }
+
+        return { orderDoc, customerDoc: customer, paymentDoc };
       },
     );
 
-    return this.buildOrderResponse(orderDoc, customerDoc, 0, []);
+    return this.buildOrderResponse(
+      orderDoc,
+      customerDoc,
+      paidNowPaise,
+      paymentDoc ? [paymentDoc] : [],
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -598,7 +673,10 @@ export class OrdersService {
         createdBy: userObjectId,
       }));
 
-      await this.transactionModel.create(reversals, { session });
+      await this.transactionModel.create(reversals, {
+        session,
+        ordered: true,
+      });
 
       // 3. Update Order status
       order.status = OrderStatus.CANCELLED;
@@ -642,6 +720,17 @@ export class OrdersService {
         ? paiseToRupees(Math.max(0, orderTotalPaise - paidPaise))
         : 0;
 
+    let paymentStatus: OrderPaymentStatus;
+    if (order.status === OrderStatus.CANCELLED) {
+      paymentStatus = 'CANCELLED';
+    } else if (paidPaise >= orderTotalPaise && orderTotalPaise > 0) {
+      paymentStatus = 'PAID';
+    } else if (paidPaise > 0) {
+      paymentStatus = 'PARTIALLY PAID';
+    } else {
+      paymentStatus = 'UNPAID';
+    }
+
     const items: OrderItemResponse[] = order.items.map((item) => ({
       productId: item.productId.toString(),
       productNameSnapshot: item.productNameSnapshot,
@@ -672,7 +761,12 @@ export class OrdersService {
       status: order.status,
       paidAmount,
       outstandingAmount,
-      payments: payments ? payments.map((p) => p.toObject()) : undefined,
+      paymentStatus,
+      payments: payments
+        ? payments.map((p) =>
+            typeof (p as any).toObject === 'function' ? p.toObject() : p,
+          )
+        : undefined,
       createdBy: order.createdBy ? order.createdBy.toString() : '',
       createdAt: (order as any).createdAt,
       updatedAt: (order as any).updatedAt,

@@ -8,6 +8,7 @@ export interface InventoryItem {
   fullBoxes: number;
   loosePieces: number;
   totalSqFt: number;
+  minimumStockBoxes: number;
   isLowStock: boolean;
   createdAt?: string;
   updatedAt?: string;

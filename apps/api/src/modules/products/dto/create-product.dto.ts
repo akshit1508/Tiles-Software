@@ -38,7 +38,7 @@ export class ImageReferenceDto {
  * - piecesPerBox must be a positive integer (>= 1).
  * - areaPerBox must be > 0.
  * - purchasePrice / sellingPrice must be >= 0 (reference values).
- * - minimumStockPieces must be a non-negative integer (default 0).
+ * - minimumStockBoxes must be a non-negative integer (default 0).
  * - isActive is server-controlled; cannot be set by client at create time.
  */
 export class CreateProductDto {
@@ -123,7 +123,29 @@ export class CreateProductDto {
   @Min(0, { message: 'sellingPrice must be 0 or greater' })
   sellingPrice: number;
 
-  /** Minimum physical piece threshold for low-stock alerts. Non-negative integer. */
+  /** Minimum stock threshold in complete boxes. Non-negative integer. */
+  @IsInt({ message: 'minimumStockBoxes must be an integer' })
+  @Min(0, { message: 'minimumStockBoxes must be 0 or greater' })
+  @IsOptional()
+  minimumStockBoxes?: number;
+
+  /**
+   * Initial stock quantity in complete boxes at product creation time.
+   * Converted internally to totalPieces = initialStockBoxes * piecesPerBox.
+   * Non-negative integer.
+   */
+  @IsInt({ message: 'initialStockBoxes must be an integer' })
+  @Min(0, { message: 'initialStockBoxes must be 0 or greater' })
+  @IsOptional()
+  initialStockBoxes?: number;
+
+  /** Number of boxes coming / initially received into stock. Maintained for backward compatibility. */
+  @IsInt({ message: 'incomingBoxes must be an integer' })
+  @Min(0, { message: 'incomingBoxes must be 0 or greater' })
+  @IsOptional()
+  incomingBoxes?: number;
+
+  /** Legacy / optional piece threshold fallback. */
   @IsInt({ message: 'minimumStockPieces must be an integer' })
   @Min(0, { message: 'minimumStockPieces must be 0 or greater' })
   @IsOptional()

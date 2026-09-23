@@ -5,7 +5,11 @@ export interface LowStockProductInfo {
   productName: string;
   brand: string;
   currentPieces: number;
-  minimumStockPieces: number;
+  fullBoxes: number;
+  loosePieces: number;
+  piecesPerBox: number;
+  minimumStockBoxes: number;
+  minimumStockPieces?: number;
 }
 
 export interface LowStockSummary {

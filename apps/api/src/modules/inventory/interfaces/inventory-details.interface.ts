@@ -1,4 +1,4 @@
-﻿import { ProductDocument } from '../../products/schemas/product.schema';
+import { ProductDocument } from '../../products/schemas/product.schema';
 import { InventoryDocument } from '../schemas/inventory.schema';
 import { InventoryTransactionDocument } from '../schemas/inventory-transaction.schema';
 
@@ -7,6 +7,7 @@ export interface InventoryDerivedValues {
   loosePieces: number;
   totalSqFt: number;
   isLowStock: boolean;
+  minimumStockBoxes: number;
 }
 
 export interface InventoryItemResponse {
@@ -16,6 +17,7 @@ export interface InventoryItemResponse {
   fullBoxes: number;
   loosePieces: number;
   totalSqFt: number;
+  minimumStockBoxes: number;
   isLowStock: boolean;
   createdAt?: Date;
   updatedAt?: Date;

@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, Button, Input, Select } from '@/components/ui';
+import { Modal, Button, Input, Select, Badge, SearchableSelect } from '@/components/ui';
 import { CustomerListItem, customersApi } from '@/lib/api/customers';
 import { Product, productsApi, parseDecimalValue, formatCurrencyINR } from '@/lib/api/products';
-import { CreateOrderInput, CreateOrderItemInput, SalesUnit, ordersApi, Order } from '@/lib/api/orders';
+import { CreateOrderInput, ordersApi, Order } from '@/lib/api/orders';
+import { PaymentMethod } from '@/lib/api/payments';
 import { ApiError } from '@/lib/api';
-import { Plus, Trash2, AlertCircle, ShoppingCart, Info } from 'lucide-react';
+import { Plus, Trash2, AlertCircle, ShoppingCart, CreditCard, Check, ArrowRight } from 'lucide-react';
 
 interface OrderCreateModalProps {
   isOpen: boolean;
@@ -15,8 +16,7 @@ interface OrderCreateModalProps {
 interface FormItem {
   id: string; // client-side unique id for key
   productId: string;
-  salesQuantity: string;
-  salesUnit: SalesUnit;
+  quantityBoxes: string;
   unitPrice: string;
 }
 
@@ -32,11 +32,15 @@ export function OrderCreateModal({
     {
       id: '1',
       productId: '',
-      salesQuantity: '1',
-      salesUnit: 'BOX',
+      quantityBoxes: '1',
       unitPrice: '',
     },
   ]);
+
+  // Payment section state
+  const [paidNow, setPaidNow] = useState<string>('0');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CASH');
+  const [paymentNotes, setPaymentNotes] = useState<string>('');
 
   const [isLoadingMasterData, setIsLoadingMasterData] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -53,11 +57,13 @@ export function OrderCreateModal({
         {
           id: Math.random().toString(),
           productId: '',
-          salesQuantity: '1',
-          salesUnit: 'BOX',
+          quantityBoxes: '1',
           unitPrice: '',
         },
       ]);
+      setPaidNow('0');
+      setPaymentMethod('CASH');
+      setPaymentNotes('');
 
       const loadData = async () => {
         try {
@@ -87,44 +93,11 @@ export function OrderCreateModal({
         let defaultPrice = '';
         if (prod) {
           const sellingBox = parseDecimalValue(prod.sellingPrice);
-          if (item.salesUnit === 'BOX') {
-            defaultPrice = sellingBox.toString();
-          } else if (item.salesUnit === 'PIECE' && prod.piecesPerBox > 0) {
-            defaultPrice = (sellingBox / prod.piecesPerBox).toFixed(2);
-          } else if (item.salesUnit === 'SQ_FT') {
-            const area = parseDecimalValue(prod.areaPerBox);
-            defaultPrice = area > 0 ? (sellingBox / area).toFixed(2) : sellingBox.toString();
-          }
+          defaultPrice = sellingBox.toString();
         }
         return {
           ...item,
           productId: newProductId,
-          unitPrice: defaultPrice,
-        };
-      }),
-    );
-  };
-
-  const handleUnitChange = (itemId: string, newUnit: SalesUnit) => {
-    setItems((prev) =>
-      prev.map((item) => {
-        if (item.id !== itemId) return item;
-        const prod = products.find((p) => p._id === item.productId);
-        let defaultPrice = item.unitPrice;
-        if (prod) {
-          const sellingBox = parseDecimalValue(prod.sellingPrice);
-          if (newUnit === 'BOX') {
-            defaultPrice = sellingBox.toString();
-          } else if (newUnit === 'PIECE' && prod.piecesPerBox > 0) {
-            defaultPrice = (sellingBox / prod.piecesPerBox).toFixed(2);
-          } else if (newUnit === 'SQ_FT') {
-            const area = parseDecimalValue(prod.areaPerBox);
-            defaultPrice = area > 0 ? (sellingBox / area).toFixed(2) : sellingBox.toString();
-          }
-        }
-        return {
-          ...item,
-          salesUnit: newUnit,
           unitPrice: defaultPrice,
         };
       }),
@@ -143,8 +116,7 @@ export function OrderCreateModal({
       {
         id: Math.random().toString(),
         productId: '',
-        salesQuantity: '1',
-        salesUnit: 'BOX',
+        quantityBoxes: '1',
         unitPrice: '',
       },
     ]);
@@ -155,6 +127,29 @@ export function OrderCreateModal({
     setItems((prev) => prev.filter((item) => item.id !== itemId));
   };
 
+  // Live estimated order total
+  const estimatedTotal = items.reduce((sum, item) => {
+    const boxes = parseInt(item.quantityBoxes, 10) || 0;
+    const price = parseFloat(item.unitPrice) || 0;
+    return sum + boxes * price;
+  }, 0);
+
+  const parsedPaidNow = parseFloat(paidNow) || 0;
+  const liveOutstanding = Math.max(0, estimatedTotal - parsedPaidNow);
+
+  // Derived payment status preview
+  let livePaymentStatus: 'PAID' | 'PARTIALLY PAID' | 'UNPAID' = 'UNPAID';
+  if (estimatedTotal > 0 && parsedPaidNow >= estimatedTotal) {
+    livePaymentStatus = 'PAID';
+  } else if (parsedPaidNow > 0) {
+    livePaymentStatus = 'PARTIALLY PAID';
+  }
+
+  const handlePaidFull = () => {
+    setPaidNow(estimatedTotal.toString());
+    setFieldErrors((prev) => ({ ...prev, paidNow: '' }));
+  };
+
   const validate = (): boolean => {
     const errors: Record<string, string> = {};
 
@@ -163,7 +158,7 @@ export function OrderCreateModal({
     }
 
     if (items.length === 0) {
-      errors.items = 'Order must contain at least one product item';
+      errors.items = 'Sale must contain at least one tile product';
     }
 
     items.forEach((item, index) => {
@@ -171,49 +166,64 @@ export function OrderCreateModal({
         errors[`item_${index}_product`] = 'Product is required';
       }
 
-      const qty = parseFloat(item.salesQuantity);
-      if (isNaN(qty) || qty <= 0) {
-        errors[`item_${index}_qty`] = 'Quantity must be > 0';
-      } else if (item.salesUnit !== 'SQ_FT' && !Number.isInteger(qty)) {
-        errors[`item_${index}_qty`] = `${item.salesUnit} quantity must be a whole integer`;
+      const boxes = parseInt(item.quantityBoxes, 10);
+      if (isNaN(boxes) || boxes <= 0) {
+        errors[`item_${index}_qty`] = 'Quantity must be at least 1 box';
+      } else if (!Number.isInteger(parseFloat(item.quantityBoxes))) {
+        errors[`item_${index}_qty`] = 'Quantity in boxes must be an integer';
       }
 
       if (item.unitPrice.trim() !== '') {
         const price = parseFloat(item.unitPrice);
         if (isNaN(price) || price < 0) {
-          errors[`item_${index}_price`] = 'Price must be >= 0';
+          errors[`item_${index}_price`] = 'Price cannot be negative';
         }
       }
     });
+
+    const paidNum = parseFloat(paidNow);
+    if (isNaN(paidNum) || paidNum < 0) {
+      errors.paidNow = 'Paid Now cannot be negative';
+    } else if (paidNum > estimatedTotal && estimatedTotal > 0) {
+      errors.paidNow = `Payment cannot exceed order total (₹${estimatedTotal.toLocaleString('en-IN')})`;
+    }
+
+    if (paidNum > 0 && !paymentMethod) {
+      errors.paymentMethod = 'Please select a payment method for the initial payment';
+    }
 
     setFieldErrors(errors);
     return Object.keys(errors).length === 0;
   };
 
-  // Preview estimation for UX only
-  const estimatedSubtotal = items.reduce((sum, item) => {
-    const qty = parseFloat(item.salesQuantity) || 0;
-    const price = parseFloat(item.unitPrice) || 0;
-    return sum + qty * price;
-  }, 0);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setServerError(null);
 
+    if (isSubmitting) return; // Prevent double submission
     if (!validate()) return;
 
     try {
       setIsSubmitting(true);
 
+      const paidNum = parseFloat(paidNow) || 0;
+
       const orderPayload: CreateOrderInput = {
         customerId: selectedCustomerId,
         items: items.map((item) => ({
           productId: item.productId,
-          salesQuantity: parseFloat(item.salesQuantity),
-          salesUnit: item.salesUnit,
+          quantityBoxes: parseInt(item.quantityBoxes, 10),
+          salesUnit: 'BOX',
           unitPrice: item.unitPrice.trim() !== '' ? parseFloat(item.unitPrice) : undefined,
         })),
+        initialPayment:
+          paidNum > 0
+            ? {
+                amount: Math.round(paidNum * 100) / 100,
+                paymentMethod,
+                notes: paymentNotes.trim() || undefined,
+              }
+            : undefined,
       };
 
       const createdOrder = await ordersApi.create(orderPayload);
@@ -228,12 +238,12 @@ export function OrderCreateModal({
               : err.message,
           );
         } else {
-          setServerError(err.message || 'Failed to create order. Please verify stock availability.');
+          setServerError(err.message || 'Failed to create sale. Please check box inventory availability.');
         }
       } else if (err instanceof Error) {
         setServerError(err.message);
       } else {
-        setServerError('An unexpected error occurred while processing order creation.');
+        setServerError('An unexpected error occurred while processing the sale.');
       }
     } finally {
       setIsSubmitting(false);
@@ -244,8 +254,8 @@ export function OrderCreateModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Create New Sales Order"
-      description="Create a tile order directly in COMPLETED status. The backend will atomically assign an order number and deduct inventory."
+      title="New Sale (Combined Order & Payment)"
+      description="Create a box-only tile sale, atomically deduct inventory, and record any initial payment at sale."
       size="xl"
     >
       {serverError && (
@@ -258,33 +268,41 @@ export function OrderCreateModal({
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-5">
-        {/* Customer Selector */}
-        <div>
-          <Select
-            label="Customer *"
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {/* 1. Customer Section */}
+        <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 space-y-2">
+          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+            Customer Details
+          </h4>
+          <SearchableSelect
+            label="Select Customer *"
             value={selectedCustomerId}
-            onChange={(e) => {
-              setSelectedCustomerId(e.target.value);
+            onChange={(val) => {
+              setSelectedCustomerId(val);
               setFieldErrors((prev) => ({ ...prev, customerId: '' }));
             }}
             error={fieldErrors.customerId}
             disabled={isSubmitting || isLoadingMasterData}
-            options={[
-              { label: 'Select customer account...', value: '' },
-              ...customers.map((c) => ({
-                label: `${c.name} (${c.phone}) ${c.outstandingBalance > 0 ? `[Pending: ${formatCurrencyINR(c.outstandingBalance)}]` : ''}`,
-                value: c._id,
-              })),
-            ]}
+            isLoading={isLoadingMasterData}
+            loadingText="Loading customers..."
+            placeholder="Search customer by name or phone..."
+            emptyText="No matching customers found"
+            options={customers.map((c) => ({
+              value: c._id,
+              label: c.name,
+              sublabel: c.phone,
+              tag: c.outstandingBalance > 0 ? `Pending: ${formatCurrencyINR(c.outstandingBalance)}` : undefined,
+              searchTerms: [c.name, c.phone, c.address || ''],
+            }))}
           />
         </div>
 
-        {/* Order Items Table */}
+        {/* 2. Items Section (BOX-ONLY) */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-700">
-              Order Items ({items.length})
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+              <ShoppingCart className="h-4 w-4 text-slate-500" />
+              Tile Products (Boxes Only) — {items.length} {items.length === 1 ? 'Item' : 'Items'}
             </h4>
             <Button
               type="button"
@@ -295,76 +313,64 @@ export function OrderCreateModal({
               className="text-blue-600 border-blue-200 hover:bg-blue-50"
             >
               <Plus className="h-3.5 w-3.5 mr-1" />
-              Add Product Line
+              Add Product
             </Button>
           </div>
 
           <div className="space-y-2.5">
             {items.map((item, index) => {
-              const itemTotal = (parseFloat(item.salesQuantity) || 0) * (parseFloat(item.unitPrice) || 0);
+              const boxes = parseInt(item.quantityBoxes, 10) || 0;
+              const price = parseFloat(item.unitPrice) || 0;
+              const itemTotal = boxes * price;
 
               return (
                 <div
                   key={item.id}
-                  className="rounded-lg border border-slate-200 bg-slate-50/50 p-3 space-y-2"
+                  className="rounded-lg border border-slate-200 bg-slate-50/70 p-3 space-y-2"
                 >
                   <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
                     {/* Product */}
-                    <div className="md:col-span-5">
+                    <div className="md:col-span-6">
                       <Select
-                        label={`Item #${index + 1} Product *`}
+                        label={`Product #${index + 1} *`}
                         value={item.productId}
                         onChange={(e) => handleProductChange(item.id, e.target.value)}
                         error={fieldErrors[`item_${index}_product`]}
                         disabled={isSubmitting || isLoadingMasterData}
                         options={[
-                          { label: 'Select product...', value: '' },
+                          { label: 'Select tile product...', value: '' },
                           ...products.map((p) => ({
-                            label: `${p.productName} (${p.gallaNumber}) — Ref: ${formatCurrencyINR(p.sellingPrice)}/box`,
+                            label: `${p.productName} (${p.brand} - ${p.gallaNumber}) [${formatCurrencyINR(p.sellingPrice)}/box]`,
                             value: p._id,
                           })),
                         ]}
                       />
                     </div>
 
-                    {/* Sales Unit */}
-                    <div className="md:col-span-2">
-                      <Select
-                        label="Unit *"
-                        value={item.salesUnit}
-                        onChange={(e) => handleUnitChange(item.id, e.target.value as SalesUnit)}
-                        disabled={isSubmitting}
-                        options={[
-                          { label: 'BOX', value: 'BOX' },
-                          { label: 'PIECE', value: 'PIECE' },
-                          { label: 'SQ_FT', value: 'SQ_FT' },
-                        ]}
-                      />
-                    </div>
-
-                    {/* Quantity */}
-                    <div className="md:col-span-2">
+                    {/* Quantity in BOXES */}
+                    <div className="md:col-span-3">
                       <Input
-                        label="Quantity *"
+                        label="Quantity (BOXES) *"
                         type="number"
-                        min={item.salesUnit === 'SQ_FT' ? '0.01' : '1'}
-                        step={item.salesUnit === 'SQ_FT' ? '0.01' : '1'}
-                        value={item.salesQuantity}
-                        onChange={(e) => handleItemChange(item.id, 'salesQuantity', e.target.value)}
+                        min="1"
+                        step="1"
+                        placeholder="e.g. 20"
+                        value={item.quantityBoxes}
+                        onChange={(e) => handleItemChange(item.id, 'quantityBoxes', e.target.value)}
                         error={fieldErrors[`item_${index}_qty`]}
                         disabled={isSubmitting}
                         required
                       />
                     </div>
 
-                    {/* Transaction Unit Price */}
+                    {/* Unit Price (₹ / BOX) */}
                     <div className="md:col-span-2">
                       <Input
-                        label="Unit Price (₹)"
+                        label="Price (₹ / BOX)"
                         type="number"
                         min="0"
                         step="0.01"
-                        placeholder="Ref price"
+                        placeholder="Price/box"
                         value={item.unitPrice}
                         onChange={(e) => handleItemChange(item.id, 'unitPrice', e.target.value)}
                         error={fieldErrors[`item_${index}_price`]}
@@ -372,7 +378,7 @@ export function OrderCreateModal({
                       />
                     </div>
 
-                    {/* Actions */}
+                    {/* Delete Item */}
                     <div className="md:col-span-1 flex items-center justify-end pb-1.5">
                       <Button
                         type="button"
@@ -388,10 +394,10 @@ export function OrderCreateModal({
                     </div>
                   </div>
 
-                  {/* Line Total Preview */}
+                  {/* Line Total */}
                   {itemTotal > 0 && (
-                    <div className="text-right text-xs text-slate-600 font-mono">
-                      Line Total Est: <span className="font-semibold text-slate-900">{formatCurrencyINR(itemTotal)}</span>
+                    <div className="text-right text-xs font-mono text-slate-600">
+                      Line Total: <span className="font-bold text-slate-900">{formatCurrencyINR(itemTotal)}</span>
                     </div>
                   )}
                 </div>
@@ -400,25 +406,140 @@ export function OrderCreateModal({
           </div>
         </div>
 
-        {/* Estimated Order Summary */}
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div className="flex items-start gap-2 text-xs text-slate-600">
-            <Info className="h-4 w-4 text-slate-400 flex-shrink-0 mt-0.5" />
-            <span>
-              Authoritative order number (<span className="font-mono font-medium">GT-YYYYMMDD-XXXX</span>) and exact total amounts are generated atomically by the backend server.
-            </span>
+        {/* 3. Order Summary & Totals */}
+        <div className="rounded-xl border border-slate-200 bg-white p-4 flex items-center justify-between shadow-xs">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Order Total</div>
+            <div className="text-xs text-slate-400">Calculated from box quantities & unit prices</div>
           </div>
-
-          <div className="text-right whitespace-nowrap">
-            <div className="text-xs text-slate-500 font-medium">Estimated Total Preview</div>
-            <div className="text-xl font-bold font-mono text-slate-900">
-              {formatCurrencyINR(estimatedSubtotal)}
-            </div>
+          <div className="text-2xl font-bold font-mono text-slate-900">
+            {formatCurrencyINR(estimatedTotal)}
           </div>
         </div>
 
+        {/* 4. PAYMENT AT SALE (Initial Payment Section) */}
+        <div className="rounded-xl border border-blue-200 bg-blue-50/30 p-4 space-y-4">
+          <div className="flex items-center justify-between border-b border-blue-100 pb-2">
+            <div className="flex items-center gap-2">
+              <CreditCard className="h-4 w-4 text-blue-600" />
+              <h4 className="text-xs font-bold uppercase tracking-wider text-blue-900">
+                Payment at Sale
+              </h4>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-slate-500">Status:</span>
+              <Badge
+                variant={
+                  livePaymentStatus === 'PAID'
+                    ? 'success'
+                    : livePaymentStatus === 'PARTIALLY PAID'
+                      ? 'warning'
+                      : 'neutral'
+                }
+                size="sm"
+              >
+                {livePaymentStatus}
+              </Badge>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
+            {/* Paid Now */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label
+                  htmlFor="paid-now-input"
+                  className="block text-xs font-semibold uppercase tracking-wider text-slate-700"
+                >
+                  Paid Now (₹)
+                </label>
+                {estimatedTotal > 0 && (
+                  <button
+                    type="button"
+                    onClick={handlePaidFull}
+                    disabled={isSubmitting}
+                    className="text-xs font-medium text-blue-600 hover:text-blue-800 hover:underline"
+                  >
+                    Paid Full
+                  </button>
+                )}
+              </div>
+              <Input
+                id="paid-now-input"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="0.00"
+                value={paidNow}
+                onChange={(e) => {
+                  setPaidNow(e.target.value);
+                  setFieldErrors((prev) => ({ ...prev, paidNow: '' }));
+                }}
+                error={fieldErrors.paidNow}
+                disabled={isSubmitting}
+              />
+              <p className="text-[11px] text-slate-500 mt-1">
+                Enter ₹0 for Unpaid / Credit sale.
+              </p>
+            </div>
+
+            {/* Payment Method */}
+            <div>
+              <Select
+                label={`Payment Method ${parsedPaidNow > 0 ? '*' : '(Optional)'}`}
+                value={paymentMethod}
+                onChange={(e) => {
+                  setPaymentMethod(e.target.value as PaymentMethod);
+                  setFieldErrors((prev) => ({ ...prev, paymentMethod: '' }));
+                }}
+                error={fieldErrors.paymentMethod}
+                disabled={isSubmitting || parsedPaidNow === 0}
+                options={[
+                  { label: 'Cash', value: 'CASH' },
+                  { label: 'UPI', value: 'UPI' },
+                  { label: 'Bank Transfer', value: 'BANK_TRANSFER' },
+                  { label: 'Cheque', value: 'CHEQUE' },
+                ]}
+              />
+              {parsedPaidNow === 0 && (
+                <p className="text-[11px] text-slate-400 mt-1">Not required for credit sale.</p>
+              )}
+            </div>
+
+            {/* Remaining Outstanding Display */}
+            <div className="rounded-lg border border-slate-200 bg-white p-3 text-center">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                Remaining Outstanding
+              </div>
+              <div
+                className={`mt-1 font-mono text-xl font-bold ${
+                  liveOutstanding > 0 ? 'text-amber-800' : 'text-emerald-700'
+                }`}
+              >
+                {formatCurrencyINR(liveOutstanding)}
+              </div>
+              <div className="text-[10px] text-slate-400 mt-0.5">
+                {liveOutstanding > 0 ? 'To be collected later' : 'Fully settled'}
+              </div>
+            </div>
+          </div>
+
+          {/* Payment Notes */}
+          {parsedPaidNow > 0 && (
+            <div>
+              <Input
+                label="Payment Notes / Transaction Reference (Optional)"
+                placeholder="e.g. UPI ref #, Cash received by owner, Cheque number"
+                value={paymentNotes}
+                onChange={(e) => setPaymentNotes(e.target.value)}
+                disabled={isSubmitting}
+              />
+            </div>
+          )}
+        </div>
+
         {/* Action Buttons */}
-        <div className="mt-6 flex justify-end gap-3 pt-2">
+        <div className="flex justify-end gap-3 pt-3 border-t border-slate-200">
           <Button
             type="button"
             variant="outline"
@@ -432,7 +553,7 @@ export function OrderCreateModal({
             variant="primary"
             disabled={isSubmitting || !selectedCustomerId}
           >
-            {isSubmitting ? 'Creating Order...' : 'Confirm & Complete Sale'}
+            {isSubmitting ? 'Creating Sale...' : 'Create Sale'}
           </Button>
         </div>
       </form>

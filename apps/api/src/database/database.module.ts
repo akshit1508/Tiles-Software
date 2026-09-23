@@ -11,6 +11,7 @@ import { MongooseModule } from '@nestjs/mongoose';
         const uri = configService.get<string>('DATABASE_URL');
         return {
           uri: uri || 'mongodb://localhost:27017/goverdhan-traders',
+          serverSelectionTimeoutMS: 5000,
         };
       },
     }),
