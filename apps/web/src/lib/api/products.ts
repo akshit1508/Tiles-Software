@@ -120,11 +120,11 @@ export const productsApi = {
   },
 
   create: (data: CreateProductInput): Promise<{ product: Product }> => {
-    return api.post<{ product: Product }>('/products', data);
+    return api.post<{ product: Product }>('/products', data, { timeout: 30000 });
   },
 
   update: (id: string, data: UpdateProductInput): Promise<{ product: Product }> => {
-    return api.patch<{ product: Product }>(`/products/${id}`, data);
+    return api.patch<{ product: Product }>(`/products/${id}`, data, { timeout: 30000 });
   },
 
   deactivate: (id: string): Promise<{ product: Product }> => {
@@ -140,6 +140,6 @@ export const productsApi = {
     files.forEach((file) => {
       formData.append('images', file);
     });
-    return api.post<ImageReference[]>('/products/upload-images', formData);
+    return api.post<ImageReference[]>('/products/upload-images', formData, { timeout: 60000 });
   },
 };

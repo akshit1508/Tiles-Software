@@ -41,19 +41,19 @@ export default function AdminLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { user, isAuthenticated, isLoading, logout } = useAuth();
+  const { user, isAuthenticated, isLoading, logout, authStatus, retryAuth } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
-  // Protected route guard
+  // Protected route guard: only redirect to /login when definitely unauthenticated
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
+    if (authStatus === 'unauthenticated') {
       router.replace('/login');
     }
-  }, [isLoading, isAuthenticated, router]);
+  }, [authStatus, router]);
 
   // Close mobile drawer on route change
   useEffect(() => {
@@ -80,6 +80,33 @@ export default function AdminLayout({
           <p className="mt-4 text-sm font-medium text-slate-600">
             Loading Goverdhan Traders...
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (authStatus === 'error') {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
+        <div className="flex flex-col items-center gap-4 text-center max-w-sm">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-rose-100">
+            <AlertCircle className="h-7 w-7 text-rose-600" />
+          </div>
+          <div>
+            <h1 className="text-lg font-semibold text-slate-900">
+              Cannot Reach Server
+            </h1>
+            <p className="mt-1 text-sm text-slate-500">
+              The Goverdhan Traders backend is unavailable or took too long to respond.
+            </p>
+          </div>
+          <Button
+            variant="primary"
+            onClick={retryAuth}
+            className="shadow-sm"
+          >
+            Retry Connection
+          </Button>
         </div>
       </div>
     );

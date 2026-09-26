@@ -216,6 +216,7 @@ export function ProductFormModal({
     e.preventDefault();
     setServerError(null);
 
+    if (isSubmitting) return;
     if (!validate()) return;
 
     try {
@@ -604,6 +605,7 @@ export function ProductFormModal({
             type="submit"
             variant="primary"
             isLoading={isSubmitting}
+            disabled={isSubmitting || isUploadingImages}
           >
             {isEdit ? 'Save Changes' : 'Create Product'}
           </Button>

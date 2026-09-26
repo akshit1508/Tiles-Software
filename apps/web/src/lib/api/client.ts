@@ -70,9 +70,14 @@ export async function apiClient<T>(
     }
   }
 
-  const timeoutMs = options.timeout ?? 5000;
+  const DEFAULT_TIMEOUT_MS = 30000;
+  const timeoutMs = options.timeout ?? DEFAULT_TIMEOUT_MS;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // If caller provided their own signal without explicit timeout, let caller's signal control abort
+  const timer =
+    options.signal && options.timeout === undefined
+      ? undefined
+      : setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(url, {
@@ -84,7 +89,7 @@ export async function apiClient<T>(
       credentials: 'include',
       signal: options.signal || controller.signal,
     });
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
 
     // Handle 204 No Content
     if (response.status === 204) {
@@ -111,19 +116,22 @@ export async function apiClient<T>(
 
     return data as T;
   } catch (error) {
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
     if (error instanceof ApiError) {
       throw error;
     }
 
+    const isTimeout =
+      (error instanceof Error && error.name === 'AbortError') ||
+      controller.signal.aborted;
+
     // Network error or unexpected exception (e.g., API unavailable)
     throw new ApiError({
       statusCode: 0,
-      message:
-        error instanceof Error
-          ? error.name === 'AbortError'
-            ? 'Request timed out. The server took too long to respond.'
-            : error.message
+      message: isTimeout
+        ? 'Request timed out. The server took too long to respond.'
+        : error instanceof Error
+          ? error.message
           : 'Unable to connect to the server. Please check your internet connection or try again later.',
     });
   }
