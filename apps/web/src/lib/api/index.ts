@@ -8,3 +8,4 @@ export * from './payments';
 export * from './dashboard';
 export * from './outstanding';
 export * from './gallas';
+export * from './reports';

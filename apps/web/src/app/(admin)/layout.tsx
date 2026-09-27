@@ -17,14 +17,21 @@ import {
   LogOut,
   User as UserIcon,
   ChevronRight,
+  FileText,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { Button, Badge, ConfirmDialog } from '@/components/ui';
+
+interface NavSubItem {
+  label: string;
+  href: string;
+}
 
 interface NavItem {
   label: string;
   href: string;
   icon: React.ComponentType<{ className?: string }>;
+  children?: NavSubItem[];
 }
 
 const navItems: NavItem[] = [
@@ -36,6 +43,14 @@ const navItems: NavItem[] = [
   { label: 'Orders', href: '/orders', icon: ShoppingCart },
   { label: 'Payments', href: '/payments', icon: CreditCard },
   { label: 'Outstanding', href: '/outstanding', icon: AlertCircle },
+  {
+    label: 'Reports',
+    href: '/reports/tile-stock',
+    icon: FileText,
+    children: [
+      { label: 'Tile Stock Report', href: '/reports/tile-stock' },
+    ],
+  },
 ];
 
 export default function AdminLayout({
@@ -169,27 +184,49 @@ export default function AdminLayout({
               (item.href !== '/dashboard' && pathname.startsWith(item.href));
 
             return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`group flex items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${
-                  isActive
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <Icon
-                    className={`h-5 w-5 flex-shrink-0 transition-colors ${
-                      isActive ? 'text-white' : 'text-slate-400 group-hover:text-white'
-                    }`}
-                  />
-                  <span>{item.label}</span>
-                </div>
-                {isActive && (
-                  <ChevronRight className="h-4 w-4 text-blue-200" />
+              <div key={item.href} className="space-y-1">
+                <Link
+                  href={item.href}
+                  className={`group flex items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${
+                    isActive
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Icon
+                      className={`h-5 w-5 flex-shrink-0 transition-colors ${
+                        isActive ? 'text-white' : 'text-slate-400 group-hover:text-white'
+                      }`}
+                    />
+                    <span>{item.label}</span>
+                  </div>
+                  {isActive && !item.children && (
+                    <ChevronRight className="h-4 w-4 text-blue-200" />
+                  )}
+                </Link>
+
+                {item.children && (isActive || pathname.startsWith('/reports')) && (
+                  <div className="ml-7 pl-2.5 border-l border-slate-700/80 space-y-1 py-1">
+                    {item.children.map((child) => {
+                      const isChildActive = pathname === child.href;
+                      return (
+                        <Link
+                          key={child.href}
+                          href={child.href}
+                          className={`block rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                            isChildActive
+                              ? 'bg-slate-800 text-white font-semibold'
+                              : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+                          }`}
+                        >
+                          {child.label}
+                        </Link>
+                      );
+                    })}
+                  </div>
                 )}
-              </Link>
+              </div>
             );
           })}
         </nav>
