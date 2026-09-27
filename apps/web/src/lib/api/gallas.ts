@@ -68,8 +68,8 @@ export const gallasApi = {
   /**
    * List all Galla locations with product count and total box stock aggregations.
    */
-  list: (query: ListGallasQuery = {}): Promise<PaginatedGallas> => {
-    return api.get<PaginatedGallas>('/gallas', {
+  list: async (query: ListGallasQuery = {}): Promise<PaginatedGallas> => {
+    const raw = await api.get<PaginatedGallas | Galla[]>('/gallas', {
       params: {
         page: query.page,
         limit: query.limit,
@@ -77,6 +77,18 @@ export const gallasApi = {
         isActive: query.isActive !== undefined ? query.isActive : undefined,
       },
     });
+
+    if (Array.isArray(raw)) {
+      return {
+        data: raw,
+        total: raw.length,
+        page: query.page || 1,
+        limit: query.limit || raw.length,
+        totalPages: 1,
+      };
+    }
+
+    return raw;
   },
 
   /**

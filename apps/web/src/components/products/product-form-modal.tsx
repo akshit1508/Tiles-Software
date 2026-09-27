@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { AlertCircle, Upload, X, Loader2, Image as ImageIcon } from 'lucide-react';
+import { AlertCircle, Upload, X, Loader2, Image as ImageIcon, Plus } from 'lucide-react';
 import { Modal, Button, Input } from '@/components/ui';
 import {
   Product,
@@ -150,11 +150,9 @@ export function ProductFormModal({
         initialStockBoxes: String(product.initialStockBoxes ?? product.incomingBoxes ?? 0),
       });
       setImages(product.images || []);
-      setIsCustomGalla(false);
     } else {
       setForm(initialFormState);
       setImages([]);
-      setIsCustomGalla(false);
     }
     setFieldErrors({});
     setServerError(null);
