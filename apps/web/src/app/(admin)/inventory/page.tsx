@@ -21,6 +21,7 @@ import {
   inventoryApi,
 } from '@/lib/api/inventory';
 import { Product, productsApi } from '@/lib/api/products';
+import { Galla, gallasApi } from '@/lib/api/gallas';
 import { ApiError } from '@/lib/api';
 import {
   InventoryFilters,
@@ -41,6 +42,8 @@ export default function InventoryPage() {
   // Filters
   const [search, setSearch] = useState('');
   const [lowStockOnly, setLowStockOnly] = useState(false);
+  const [selectedGallaId, setSelectedGallaId] = useState<string>('');
+  const [availableGallas, setAvailableGallas] = useState<Galla[]>([]);
 
   // UI state
   const [isLoading, setIsLoading] = useState(true);
@@ -65,6 +68,7 @@ export default function InventoryPage() {
       const response = await inventoryApi.list({
         page,
         limit,
+        gallaId: selectedGallaId || undefined,
         lowStockOnly: lowStockOnly ? true : undefined,
         search: search.trim() || undefined,
       });
@@ -83,19 +87,23 @@ export default function InventoryPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [page, limit, lowStockOnly, search]);
+  }, [page, limit, selectedGallaId, lowStockOnly, search]);
 
   useEffect(() => {
     fetchInventory();
   }, [fetchInventory]);
 
-  // Load available active products for top-level action modals
+  // Load available active products and gallas
   const fetchAvailableProducts = useCallback(async () => {
     try {
-      const res = await productsApi.list({ limit: 100, isActive: true });
-      setAvailableProducts(res.data);
+      const [prodRes, gallaRes] = await Promise.all([
+        productsApi.list({ limit: 100, isActive: true }),
+        gallasApi.list({ limit: 100, isActive: true }),
+      ]);
+      setAvailableProducts(prodRes.data);
+      setAvailableGallas(gallaRes.data);
     } catch {
-      // Non-blocking: table actions will still work with row product
+      // Non-blocking
     }
   }, []);
 
@@ -111,9 +119,14 @@ export default function InventoryPage() {
     }
   }, [successMessage]);
 
-  const handleFilterChange = (filters: { search: string; lowStockOnly: boolean }) => {
+  const handleFilterChange = (filters: {
+    search: string;
+    lowStockOnly: boolean;
+    gallaId?: string;
+  }) => {
     setSearch(filters.search);
     setLowStockOnly(filters.lowStockOnly);
+    setSelectedGallaId(filters.gallaId || '');
     setPage(1);
   };
 
@@ -254,6 +267,8 @@ export default function InventoryPage() {
       <InventoryFilters
         search={search}
         lowStockOnly={lowStockOnly}
+        gallaId={selectedGallaId}
+        availableGallas={availableGallas}
         onFilterChange={handleFilterChange}
         isLoading={isLoading}
       />

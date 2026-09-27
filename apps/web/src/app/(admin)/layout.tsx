@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard,
   Package,
+  Warehouse,
   Boxes,
   Users,
   ShoppingCart,
@@ -29,6 +30,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { label: 'Products', href: '/products', icon: Package },
+  { label: 'Gallas', href: '/gallas', icon: Warehouse },
   { label: 'Inventory', href: '/inventory', icon: Boxes },
   { label: 'Customers', href: '/customers', icon: Users },
   { label: 'Orders', href: '/orders', icon: ShoppingCart },

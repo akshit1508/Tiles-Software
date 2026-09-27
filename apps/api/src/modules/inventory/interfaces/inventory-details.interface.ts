@@ -13,6 +13,9 @@ export interface InventoryDerivedValues {
 export interface InventoryItemResponse {
   _id: string;
   productId: string | ProductDocument;
+  gallaId?: string;
+  gallaNumber?: string;
+  boxes?: number;
   totalPieces: number;
   fullBoxes: number;
   loosePieces: number;

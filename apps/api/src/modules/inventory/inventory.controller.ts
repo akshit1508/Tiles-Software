@@ -1,4 +1,4 @@
-﻿import {
+import {
   Controller,
   Get,
   Post,
@@ -51,6 +51,14 @@ export class InventoryController {
     @Query() query: ListInventoryDto,
   ): Promise<PaginatedInventoryResponse> {
     return this.inventoryService.findAll(query);
+  }
+
+  @Get('product/:productId/locations')
+  async getProductLocations(
+    @Param('productId') productId: string,
+  ): Promise<{ locations: Array<{ _id: string; gallaId?: string; gallaNumber: string; boxes: number; totalPieces: number }> }> {
+    const locations = await this.inventoryService.getProductLocations(productId);
+    return { locations };
   }
 
   /**

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
+import { MigrationService } from './migration.service';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { MongooseModule } from '@nestjs/mongoose';
       },
     }),
   ],
-  exports: [MongooseModule],
+  providers: [MigrationService],
+  exports: [MongooseModule, MigrationService],
 })
 export class DatabaseModule {}

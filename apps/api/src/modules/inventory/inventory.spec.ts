@@ -341,9 +341,11 @@ describe('Inventory Module Unit Tests', () => {
 
       // Verify both writes were performed with the session
       expect(inventoryModel.findOneAndUpdate).toHaveBeenCalledWith(
-        { productId: mockProduct._id },
-        { $inc: { totalPieces: 80 } },
-        { new: true, session: mockSession },
+        expect.objectContaining({ productId: mockProduct._id }),
+        expect.objectContaining({
+          $inc: expect.objectContaining({ totalPieces: 80 }),
+        }),
+        expect.objectContaining({ new: true, session: mockSession }),
       );
 
       expect(transactionModel.create).toHaveBeenCalledWith(

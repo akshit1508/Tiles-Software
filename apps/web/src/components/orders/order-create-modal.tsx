@@ -3,6 +3,7 @@ import { Modal, Button, Input, Select, Badge, SearchableSelect } from '@/compone
 import { CustomerListItem, customersApi } from '@/lib/api/customers';
 import { Product, productsApi, parseDecimalValue, formatCurrencyINR } from '@/lib/api/products';
 import { CreateOrderInput, ordersApi, Order } from '@/lib/api/orders';
+import { Galla, gallasApi } from '@/lib/api/gallas';
 import { PaymentMethod } from '@/lib/api/payments';
 import { ApiError } from '@/lib/api';
 import { Plus, Trash2, AlertCircle, ShoppingCart, CreditCard, Check, ArrowRight } from 'lucide-react';
@@ -16,6 +17,7 @@ interface OrderCreateModalProps {
 interface FormItem {
   id: string; // client-side unique id for key
   productId: string;
+  gallaId?: string;
   quantityBoxes: string;
   unitPrice: string;
 }
@@ -27,11 +29,13 @@ export function OrderCreateModal({
 }: OrderCreateModalProps) {
   const [customers, setCustomers] = useState<CustomerListItem[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [availableGallas, setAvailableGallas] = useState<Galla[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
   const [items, setItems] = useState<FormItem[]>([
     {
       id: '1',
       productId: '',
+      gallaId: '',
       quantityBoxes: '1',
       unitPrice: '',
     },
@@ -57,6 +61,7 @@ export function OrderCreateModal({
         {
           id: Math.random().toString(),
           productId: '',
+          gallaId: '',
           quantityBoxes: '1',
           unitPrice: '',
         },
@@ -79,6 +84,15 @@ export function OrderCreateModal({
         } finally {
           setIsLoadingMasterData(false);
         }
+
+        try {
+          const gallasRes = await gallasApi?.list?.({ limit: 100, isActive: true });
+          if (gallasRes?.data) {
+            setAvailableGallas(gallasRes.data);
+          }
+        } catch {
+          // Non-blocking
+        }
       };
 
       loadData();
@@ -91,13 +105,16 @@ export function OrderCreateModal({
       prev.map((item) => {
         if (item.id !== itemId) return item;
         let defaultPrice = '';
+        let defaultGallaId = '';
         if (prod) {
           const sellingBox = parseDecimalValue(prod.sellingPrice);
           defaultPrice = sellingBox.toString();
+          defaultGallaId = prod.gallaId || '';
         }
         return {
           ...item,
           productId: newProductId,
+          gallaId: defaultGallaId,
           unitPrice: defaultPrice,
         };
       }),
@@ -116,6 +133,7 @@ export function OrderCreateModal({
       {
         id: Math.random().toString(),
         productId: '',
+        gallaId: '',
         quantityBoxes: '1',
         unitPrice: '',
       },
@@ -210,12 +228,18 @@ export function OrderCreateModal({
 
       const orderPayload: CreateOrderInput = {
         customerId: selectedCustomerId,
-        items: items.map((item) => ({
-          productId: item.productId,
-          quantityBoxes: parseInt(item.quantityBoxes, 10),
-          salesUnit: 'BOX',
-          unitPrice: item.unitPrice.trim() !== '' ? parseFloat(item.unitPrice) : undefined,
-        })),
+        items: items.map((item) => {
+          const itemPayload: any = {
+            productId: item.productId,
+            quantityBoxes: parseInt(item.quantityBoxes, 10),
+            salesUnit: 'BOX' as const,
+            unitPrice: item.unitPrice.trim() !== '' ? parseFloat(item.unitPrice) : undefined,
+          };
+          if (item.gallaId) {
+            itemPayload.gallaId = item.gallaId;
+          }
+          return itemPayload;
+        }),
         initialPayment:
           paidNum > 0
             ? {
@@ -330,7 +354,7 @@ export function OrderCreateModal({
                 >
                   <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
                     {/* Product */}
-                    <div className="md:col-span-6">
+                    <div className="md:col-span-5">
                       <Select
                         label={`Product #${index + 1} *`}
                         value={item.productId}
@@ -340,21 +364,38 @@ export function OrderCreateModal({
                         options={[
                           { label: 'Select tile product...', value: '' },
                           ...products.map((p) => ({
-                            label: `${p.productName} (${p.brand} - ${p.gallaNumber}) [${formatCurrencyINR(p.sellingPrice)}/box]`,
+                            label: `${p.productName} (${p.brand}) [${formatCurrencyINR(p.sellingPrice)}/box]`,
                             value: p._id,
                           })),
                         ]}
                       />
                     </div>
 
+                    {/* Source Galla */}
+                    <div className="md:col-span-2">
+                      <Select
+                        label="Galla"
+                        value={item.gallaId || ''}
+                        onChange={(e) => handleItemChange(item.id, 'gallaId', e.target.value)}
+                        disabled={isSubmitting || isLoadingMasterData}
+                        options={[
+                          { label: 'Default Galla', value: '' },
+                          ...availableGallas.map((g) => ({
+                            label: g.gallaNumber,
+                            value: g._id,
+                          })),
+                        ]}
+                      />
+                    </div>
+
                     {/* Quantity in BOXES */}
-                    <div className="md:col-span-3">
+                    <div className="md:col-span-2">
                       <Input
                         label="Quantity (BOXES) *"
                         type="number"
                         min="1"
                         step="1"
-                        placeholder="e.g. 20"
+                        placeholder="Boxes"
                         value={item.quantityBoxes}
                         onChange={(e) => handleItemChange(item.id, 'quantityBoxes', e.target.value)}
                         error={fieldErrors[`item_${index}_qty`]}
@@ -370,7 +411,7 @@ export function OrderCreateModal({
                         type="number"
                         min="0"
                         step="0.01"
-                        placeholder="Price/box"
+                        placeholder="Price"
                         value={item.unitPrice}
                         onChange={(e) => handleItemChange(item.id, 'unitPrice', e.target.value)}
                         error={fieldErrors[`item_${index}_price`]}

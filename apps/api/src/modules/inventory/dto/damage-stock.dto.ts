@@ -1,4 +1,4 @@
-﻿import { IsMongoId, IsNotEmpty, IsInt, Min, IsIn, IsString } from 'class-validator';
+import { IsMongoId, IsNotEmpty, IsInt, Min, IsIn, IsString, IsOptional } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { SalesUnit } from '../../../common/enums';
 
@@ -13,6 +13,10 @@ export class DamageStockDto {
   @IsMongoId({ message: 'productId must be a valid MongoDB ObjectId' })
   @IsNotEmpty({ message: 'productId is required' })
   productId: string;
+
+  @IsOptional()
+  @IsMongoId({ message: 'gallaId must be a valid MongoDB ObjectId' })
+  gallaId?: string;
 
   @IsInt({ message: 'quantity must be an integer' })
   @Min(1, { message: 'quantity must be at least 1' })

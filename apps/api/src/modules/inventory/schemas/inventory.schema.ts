@@ -4,42 +4,59 @@ import { Document, Schema as MongooseSchema, Types } from 'mongoose';
 export type InventoryDocument = Inventory & Document;
 
 /**
- * Inventory — canonical current physical stock state for one product.
+ * Inventory — Location-segmented stock record for one product in one physical Galla.
  *
- * DATABASE.md Section 9 mandates:
- *   - Exactly ONE inventory document per product in V1.
- *   - The ONLY stored quantity is `totalPieces` (integer >= 0).
- *   - fullBoxes, loosePieces, and totalSqFt are DERIVED and must NOT be persisted here.
- *   - productId must have a UNIQUE index.
- *
- * Derived calculations (for display/API only — not stored):
- *   fullBoxes  = Math.floor(totalPieces / product.piecesPerBox)
- *   loosePieces = totalPieces % product.piecesPerBox
- *   totalSqFt  = totalPieces * (product.areaPerBox / product.piecesPerBox)
+ * Final Normalized Architecture:
+ * - Galla 1 ── N Inventory Location Records
+ * - Product 1 ── N Inventory Location Records (e.g. 20 boxes in Galla 01, 30 boxes in Galla 02)
+ * - Unique constraint on (productId + gallaId).
+ * - Location inventory records are the AUTHORITATIVE physical stock.
+ * - Product total stock is derived by summing its location inventory records.
+ * - Stored in complete BOXES (user-facing business model) and totalPieces (internal conversion).
  */
 @Schema({
   collection: 'inventories',
   timestamps: true,
 })
 export class Inventory {
-  /**
-   * Reference to the product whose stock this document tracks.
-   * Must be unique — one inventory document per product.
-   */
+  /** Reference to the product */
   @Prop({
     type: MongooseSchema.Types.ObjectId,
     ref: 'Product',
     required: true,
-    unique: true,
   })
   productId: Types.ObjectId;
 
-  /**
-   * Canonical physical stock: total individual tile pieces on hand.
-   * This is the ONLY persisted stock value.
-   * Must be a non-negative integer.
-   * Fractional pieces are never permitted (DATABASE.md Section 4.4).
-   */
+  /** Reference to the physical storage location / Galla */
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'Galla',
+    required: false, // Optional for unmigrated legacy records during transition
+  })
+  gallaId?: Types.ObjectId;
+
+  /** Denormalized snapshot of Galla code for audit and display */
+  @Prop({
+    type: String,
+    trim: true,
+    uppercase: true,
+  })
+  gallaNumber?: string;
+
+  /** Complete boxes physically present in this Galla location (>= 0 integer) */
+  @Prop({
+    type: Number,
+    required: true,
+    default: 0,
+    min: 0,
+    validate: {
+      validator: Number.isInteger,
+      message: 'boxes must be a non-negative integer',
+    },
+  })
+  boxes: number;
+
+  /** Canonical total individual tile pieces (boxes * piecesPerBox) */
   @Prop({
     type: Number,
     required: true,
@@ -55,6 +72,7 @@ export class Inventory {
 
 export const InventorySchema = SchemaFactory.createForClass(Inventory);
 
-// Note: productId unique index is handled by @Prop({ unique: true }) above.
-// No additional schema.index() call required to avoid duplicate index warnings.
-
+// Unique compound index: one stock record per product per Galla
+InventorySchema.index({ productId: 1, gallaId: 1 }, { unique: true, sparse: true });
+InventorySchema.index({ gallaId: 1 });
+InventorySchema.index({ productId: 1 });

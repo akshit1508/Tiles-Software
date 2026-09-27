@@ -7,11 +7,14 @@ export type OrderPaymentStatus = 'PAID' | 'PARTIALLY PAID' | 'UNPAID' | 'CANCELL
 
 export interface OrderItem {
   productId: string;
+  gallaId?: string;
+  gallaNumberSnapshot?: string;
   productNameSnapshot: string;
   brandSnapshot: string;
   salesQuantity: number;
   salesUnit: SalesUnit;
   physicalPieces: number;
+  quantityBoxes?: number;
   unitPrice: number;
   lineTotal: number;
 }
@@ -44,6 +47,7 @@ export interface Order {
 
 export interface CreateOrderItemInput {
   productId: string;
+  gallaId?: string;
   /** Box quantity for the BOX-only sales workflow */
   quantityBoxes?: number;
   /** Sold quantity (backward compatible) */

@@ -37,6 +37,22 @@ export class InventoryTransaction {
   })
   productId: Types.ObjectId;
 
+  /** Physical storage location / Galla where this stock movement occurred */
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'Galla',
+    required: false,
+  })
+  gallaId?: Types.ObjectId;
+
+  /** Snapshot of Galla Number at time of movement */
+  @Prop({
+    type: String,
+    trim: true,
+    uppercase: true,
+  })
+  gallaNumber?: string;
+
   @Prop({
     type: String,
     enum: Object.values(InventoryTransactionType),
@@ -105,5 +121,6 @@ InventoryTransactionSchema.set('toJSON', { getters: true });
 
 // ── Indexes (DATABASE.md Section 46) ─────────────────────────────────────────
 InventoryTransactionSchema.index({ productId: 1, createdAt: -1 });
+InventoryTransactionSchema.index({ gallaId: 1, createdAt: -1 });
 InventoryTransactionSchema.index({ orderId: 1 });
 InventoryTransactionSchema.index({ transactionType: 1, createdAt: -1 });

@@ -1,17 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { Search, X, Filter } from 'lucide-react';
 import { Button, Input, Select } from '@/components/ui';
+import { Galla } from '@/lib/api/gallas';
 
 interface InventoryFiltersProps {
   search: string;
   lowStockOnly: boolean;
-  onFilterChange: (filters: { search: string; lowStockOnly: boolean }) => void;
+  gallaId?: string;
+  availableGallas?: Galla[];
+  onFilterChange: (filters: { search: string; lowStockOnly: boolean; gallaId?: string }) => void;
   isLoading?: boolean;
 }
 
 export function InventoryFilters({
   search,
   lowStockOnly,
+  gallaId = '',
+  availableGallas = [],
   onFilterChange,
   isLoading = false,
 }: InventoryFiltersProps) {
@@ -19,6 +24,7 @@ export function InventoryFilters({
   const [localLowStock, setLocalLowStock] = useState<string>(
     lowStockOnly ? 'true' : 'false',
   );
+  const [localGallaId, setLocalGallaId] = useState<string>(gallaId);
 
   useEffect(() => {
     setLocalSearch(search);
@@ -28,11 +34,16 @@ export function InventoryFilters({
     setLocalLowStock(lowStockOnly ? 'true' : 'false');
   }, [lowStockOnly]);
 
+  useEffect(() => {
+    setLocalGallaId(gallaId);
+  }, [gallaId]);
+
   const handleApply = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     onFilterChange({
       search: localSearch.trim(),
       lowStockOnly: localLowStock === 'true',
+      gallaId: localGallaId || undefined,
     });
   };
 
@@ -42,19 +53,32 @@ export function InventoryFilters({
     onFilterChange({
       search: localSearch.trim(),
       lowStockOnly: val === 'true',
+      gallaId: localGallaId || undefined,
+    });
+  };
+
+  const handleGallaChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    setLocalGallaId(val);
+    onFilterChange({
+      search: localSearch.trim(),
+      lowStockOnly: localLowStock === 'true',
+      gallaId: val || undefined,
     });
   };
 
   const handleReset = () => {
     setLocalSearch('');
     setLocalLowStock('false');
+    setLocalGallaId('');
     onFilterChange({
       search: '',
       lowStockOnly: false,
+      gallaId: undefined,
     });
   };
 
-  const hasActiveFilters = search.trim() !== '' || lowStockOnly;
+  const hasActiveFilters = search.trim() !== '' || lowStockOnly || localGallaId !== '';
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
@@ -69,7 +93,25 @@ export function InventoryFilters({
           />
         </div>
 
-        <div className="w-full md:w-56">
+        {availableGallas.length > 0 && (
+          <div className="w-full md:w-56">
+            <Select
+              label="Galla Location"
+              value={localGallaId}
+              onChange={handleGallaChange}
+              disabled={isLoading}
+              options={[
+                { label: 'All Gallas', value: '' },
+                ...availableGallas.map((g) => ({
+                  label: `${g.gallaNumber}${g.name ? ` — ${g.name}` : ''}`,
+                  value: g._id,
+                })),
+              ]}
+            />
+          </div>
+        )}
+
+        <div className="w-full md:w-52">
           <Select
             label="Stock Level"
             value={localLowStock}

@@ -4,6 +4,8 @@ import { Product } from './products';
 export interface InventoryItem {
   _id: string;
   productId: Product | string;
+  gallaId?: string;
+  gallaNumber?: string;
   totalPieces: number;
   fullBoxes: number;
   loosePieces: number;
@@ -24,6 +26,8 @@ export type InventoryTransactionType =
 export interface InventoryTransaction {
   _id: string;
   productId: string;
+  gallaId?: string;
+  gallaNumber?: string;
   transactionType: InventoryTransactionType;
   physicalPieces: number;
   salesQuantity?: number | { $numberDecimal: string };
@@ -35,21 +39,41 @@ export interface InventoryTransaction {
   updatedAt?: string;
 }
 
+export interface ProductLocationStock {
+  gallaId?: string;
+  gallaNumber?: string;
+  gallaName?: string;
+  boxes: number;
+  totalPieces: number;
+  updatedAt?: string;
+}
+
+export interface ProductLocationsResponse {
+  productId: string;
+  totalBoxes: number;
+  totalPieces: number;
+  locations: ProductLocationStock[];
+}
+
 export interface ListInventoryQuery {
   page?: number;
   limit?: number;
+  gallaId?: string;
   lowStockOnly?: boolean;
   search?: string;
 }
 
 export interface StockInInput {
   productId: string;
+  gallaId?: string;
+  gallaNumber?: string;
   quantity: number;
   unit: 'BOX';
 }
 
 export interface DamageStockInput {
   productId: string;
+  gallaId?: string;
   quantity: number;
   unit: 'BOX' | 'PIECE';
   reason: string;
@@ -57,6 +81,7 @@ export interface DamageStockInput {
 
 export interface AdjustmentInput {
   productId: string;
+  gallaId?: string;
   physicalPieces: number;
   reason: string;
 }
@@ -93,6 +118,7 @@ export const inventoryApi = {
       params: {
         page: query.page,
         limit: query.limit,
+        gallaId: query.gallaId || undefined,
         lowStockOnly: query.lowStockOnly !== undefined ? query.lowStockOnly : undefined,
         search: query.search?.trim() ? query.search.trim() : undefined,
       },
@@ -104,6 +130,13 @@ export const inventoryApi = {
    */
   getByProductId: (productId: string): Promise<{ inventory: InventoryItem }> => {
     return api.get<{ inventory: InventoryItem }>(`/inventory/${productId}`);
+  },
+
+  /**
+   * Get physical location stock breakdown for a product across all Gallas.
+   */
+  getProductLocations: (productId: string): Promise<ProductLocationsResponse> => {
+    return api.get<ProductLocationsResponse>(`/inventory/product/${productId}/locations`);
   },
 
   /**

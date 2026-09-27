@@ -56,16 +56,20 @@ export class CreateProductDto {
   )
   productName: string;
 
+  @IsOptional()
+  @IsString({ message: 'gallaId must be a valid id string' })
+  gallaId?: string;
+
   /**
-   * Galla Number — unique business reference identifier for the tile model (SKU equivalent).
-   * Normalized to UPPERCASE + trimmed in the service layer before persistence.
+   * Galla Number — physical storage location identifier (e.g. "G-01", "GALLA 01").
+   * Stored trimmed and uppercase.
    */
+  @IsOptional()
   @IsString({ message: 'gallaNumber must be a string' })
-  @IsNotEmpty({ message: 'gallaNumber is required and cannot be empty' })
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.trim().toUpperCase() : value,
   )
-  gallaNumber: string;
+  gallaNumber?: string;
 
   @IsString({ message: 'category must be a string' })
   @IsNotEmpty({ message: 'category is required and cannot be empty' })

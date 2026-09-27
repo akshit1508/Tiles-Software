@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Modal, Button, Input, Select } from '@/components/ui';
 import { Product } from '@/lib/api/products';
 import { inventoryApi } from '@/lib/api/inventory';
+import { Galla, gallasApi } from '@/lib/api/gallas';
 import { ApiError } from '@/lib/api';
 import { AlertCircle, ArrowDownToLine } from 'lucide-react';
 
@@ -21,17 +22,38 @@ export function StockInModal({
   availableProducts = [],
 }: StockInModalProps) {
   const [selectedProductId, setSelectedProductId] = useState<string>('');
+  const [selectedGallaId, setSelectedGallaId] = useState<string>('');
+  const [availableGallas, setAvailableGallas] = useState<Galla[]>([]);
   const [quantity, setQuantity] = useState<string>('');
-  const [fieldErrors, setFieldErrors] = useState<{ productId?: string; quantity?: string }>({});
+  const [fieldErrors, setFieldErrors] = useState<{
+    productId?: string;
+    gallaId?: string;
+    quantity?: string;
+  }>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
-      setSelectedProductId(product?._id || (availableProducts[0]?._id ?? ''));
+      const prod = product || availableProducts[0];
+      setSelectedProductId(prod?._id ?? '');
       setQuantity('');
       setFieldErrors({});
       setServerError(null);
+
+      if (typeof gallasApi?.list === 'function') {
+        gallasApi
+          .list({ isActive: true, limit: 100 })
+          .then((res) => {
+            setAvailableGallas(res?.data || []);
+            if (prod?.gallaId) {
+              setSelectedGallaId(prod.gallaId);
+            } else if (res?.data && res.data.length > 0) {
+              setSelectedGallaId(res.data[0]._id);
+            }
+          })
+          .catch(() => setAvailableGallas([]));
+      }
     }
   }, [isOpen, product, availableProducts]);
 
@@ -45,7 +67,7 @@ export function StockInModal({
       : 0;
 
   const validate = (): boolean => {
-    const errors: { productId?: string; quantity?: string } = {};
+    const errors: { productId?: string; gallaId?: string; quantity?: string } = {};
 
     if (!selectedProductId) {
       errors.productId = 'Please select a product';
@@ -70,6 +92,7 @@ export function StockInModal({
       setIsSubmitting(true);
       await inventoryApi.stockIn({
         productId: selectedProductId,
+        gallaId: selectedGallaId || undefined,
         quantity: parseInt(quantity, 10),
         unit: 'BOX',
       });
@@ -139,11 +162,27 @@ export function StockInModal({
             options={[
               { label: 'Select a tile product...', value: '' },
               ...availableProducts.map((p) => ({
-                label: `${p.productName} (${p.gallaNumber}) — ${p.piecesPerBox} pcs/box`,
+                label: `${p.productName} (${p.gallaNumber || 'Unassigned'}) — ${p.piecesPerBox} pcs/box`,
                 value: p._id,
               })),
             ]}
           />
+        )}
+
+        {availableGallas.length > 0 && (
+          <div className="space-y-1">
+            <Select
+              label="Target Galla (Physical Storage Location) *"
+              value={selectedGallaId}
+              onChange={(e) => setSelectedGallaId(e.target.value)}
+              disabled={isSubmitting}
+              options={availableGallas.map((g) => ({
+                label: `${g.gallaNumber}${g.name ? ` — ${g.name}` : ''}`,
+                value: g._id,
+              }))}
+            />
+            <p className="text-xs text-slate-500">Select the physical warehouse bay/rack receiving this stock.</p>
+          </div>
         )}
 
         <div>

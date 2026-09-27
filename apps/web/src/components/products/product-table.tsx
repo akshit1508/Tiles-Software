@@ -81,7 +81,7 @@ export function ProductTable({
 
                 <TableCell>
                   <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-mono font-bold text-slate-800 border border-slate-200">
-                    {product.gallaNumber}
+                    {product.gallaNumber || '—'}
                   </span>
                 </TableCell>
 

@@ -29,9 +29,17 @@ export class Product {
   @Prop({ type: String, required: true, trim: true })
   productName: string;
 
-  /** Galla Number — business reference identifier for the tile model */
-  @Prop({ type: String, required: true, trim: true })
-  gallaNumber: string;
+  /** Primary / initial storage location reference (optional for backwards compatibility) */
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'Galla',
+    required: false,
+  })
+  gallaId?: Types.ObjectId;
+
+  /** Galla Number snapshot / reference code (NON-UNIQUE; multiple products share a Galla) */
+  @Prop({ type: String, required: false, trim: true })
+  gallaNumber?: string;
 
   @Prop({ type: String, required: true, trim: true })
   category: string;
@@ -199,7 +207,8 @@ ProductSchema.index({ brand: 1 });
 ProductSchema.index({ productName: 1 });
 ProductSchema.index({ category: 1 });
 ProductSchema.index({ isActive: 1 });
-// gallaNumber is the unique business identifier (SKU equivalent). Enforced at
-// the database level so concurrent requests cannot both succeed on the same value.
-ProductSchema.index({ gallaNumber: 1 }, { unique: true });
+// Galla is a physical storage location in the warehouse, NOT a unique product identifier.
+// Multiple products can be stored in the same Galla.
+ProductSchema.index({ gallaNumber: 1 });
+ProductSchema.index({ gallaId: 1 });
 

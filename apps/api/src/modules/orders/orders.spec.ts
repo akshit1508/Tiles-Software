@@ -735,7 +735,9 @@ describe('Orders Module Unit Tests', () => {
           productId: product._id,
           totalPieces: { $gte: 15 }, // 8 + 3 + 4 = 15 pieces
         }),
-        { $inc: { totalPieces: -15 } },
+        expect.objectContaining({
+          $inc: expect.objectContaining({ totalPieces: -15 }),
+        }),
         expect.anything(),
       );
 
@@ -1003,7 +1005,9 @@ describe('Orders Module Unit Tests', () => {
       // Verify inventory restoration called with +physicalPieces
       expect(inventoryModel.findOneAndUpdate).toHaveBeenCalledWith(
         { productId: order.items[0].productId },
-        { $inc: { totalPieces: order.items[0].physicalPieces } },
+        expect.objectContaining({
+          $inc: expect.objectContaining({ totalPieces: order.items[0].physicalPieces }),
+        }),
         expect.anything(),
       );
 
@@ -1537,7 +1541,7 @@ describe('Orders Module Unit Tests', () => {
           totalPieces: { $gte: 12 },
         }),
         expect.objectContaining({
-          $inc: { totalPieces: -12 },
+          $inc: expect.objectContaining({ totalPieces: -12 }),
         }),
         expect.anything(),
       );

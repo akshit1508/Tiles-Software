@@ -28,6 +28,17 @@ const OrderItemSchema = new MongooseSchema(
       ref: 'Product',
       required: true,
     },
+    /** Physical storage location from which this item was deducted */
+    gallaId: {
+      type: MongooseSchema.Types.ObjectId,
+      ref: 'Galla',
+      required: false,
+    },
+    gallaNumberSnapshot: {
+      type: String,
+      trim: true,
+      uppercase: true,
+    },
     productNameSnapshot: {
       type: String,
       required: true,
@@ -131,6 +142,8 @@ export class Order {
   })
   items: {
     productId: Types.ObjectId;
+    gallaId?: Types.ObjectId;
+    gallaNumberSnapshot?: string;
     productNameSnapshot: string;
     brandSnapshot: string;
     salesQuantity: Types.Decimal128;

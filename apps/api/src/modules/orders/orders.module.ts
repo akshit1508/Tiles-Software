@@ -19,6 +19,7 @@ import {
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { AuthModule } from '../auth/auth.module';
+import { GallasModule } from '../gallas/gallas.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { AuthModule } from '../auth/auth.module';
       { name: Payment.name, schema: PaymentSchema },
     ]),
     AuthModule,
+    GallasModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService],

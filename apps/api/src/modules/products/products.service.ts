@@ -14,6 +14,7 @@ import {
   InventoryTransaction,
   InventoryTransactionDocument,
 } from '../inventory/schemas/inventory-transaction.schema';
+import { Galla, GallaDocument } from '../gallas/schemas/galla.schema';
 import { InventoryTransactionType, SalesUnit } from '../../common/enums';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
@@ -42,6 +43,9 @@ export class ProductsService {
     @InjectModel(InventoryTransaction.name)
     private readonly transactionModel?: Model<InventoryTransactionDocument>,
     @Optional()
+    @InjectModel(Galla.name)
+    private readonly gallaModel?: Model<GallaDocument>,
+    @Optional()
     private readonly cloudinaryService?: CloudinaryService,
   ) {}
 
@@ -61,13 +65,54 @@ export class ProductsService {
 
   /**
    * Creates a new tile product master record and initializes its corresponding
-   * Inventory document based on initialStockBoxes * piecesPerBox.
+   * Inventory location document in the selected Galla.
    *
+   * Multiple products can reside in the same Galla (Galla 1 ── N Products).
    * If initialStockBoxes > 0, also records an initial STOCK_IN inventory transaction
-   * for an immutable audit trail.
+   * capturing the exact physical Galla location.
    */
   async create(dto: CreateProductDto, userId?: string): Promise<ProductDocument> {
-    const normalizedGallaNumber = dto.gallaNumber.trim().toUpperCase();
+    // Resolve physical storage location (Galla)
+    let resolvedGallaId: Types.ObjectId | undefined;
+    let normalizedGallaNumber: string | undefined;
+
+    if (dto.gallaId && Types.ObjectId.isValid(dto.gallaId)) {
+      resolvedGallaId = new Types.ObjectId(dto.gallaId);
+      if (this.gallaModel) {
+        const gallaDoc = await this.gallaModel.findById(resolvedGallaId).exec();
+        if (gallaDoc) {
+          normalizedGallaNumber = gallaDoc.gallaNumber;
+        }
+      }
+    } else if (dto.gallaNumber && dto.gallaNumber.trim()) {
+      normalizedGallaNumber = dto.gallaNumber.trim().toUpperCase();
+      if (this.gallaModel) {
+        let gallaDoc = await this.gallaModel.findOne({ gallaNumber: normalizedGallaNumber }).exec();
+        if (!gallaDoc) {
+          gallaDoc = await this.gallaModel.create({
+            gallaNumber: normalizedGallaNumber,
+            name: `Location ${normalizedGallaNumber}`,
+            isActive: true,
+          });
+        }
+        resolvedGallaId = gallaDoc._id;
+      }
+    }
+
+    if (!normalizedGallaNumber) {
+      normalizedGallaNumber = 'GALLA 01';
+      if (this.gallaModel && !resolvedGallaId) {
+        let gallaDoc = await this.gallaModel.findOne({ gallaNumber: 'GALLA 01' }).exec();
+        if (!gallaDoc) {
+          gallaDoc = await this.gallaModel.create({
+            gallaNumber: 'GALLA 01',
+            name: 'Main Location',
+            isActive: true,
+          });
+        }
+        resolvedGallaId = gallaDoc._id;
+      }
+    }
 
     const minimumStockBoxes =
       dto.minimumStockBoxes !== undefined
@@ -92,6 +137,7 @@ export class ProductsService {
     const productData = {
       brand: dto.brand,
       productName: dto.productName,
+      gallaId: resolvedGallaId,
       gallaNumber: normalizedGallaNumber,
       category: dto.category,
       size: dto.size,
@@ -114,35 +160,41 @@ export class ProductsService {
       product = await this.productModel.create(productData);
     } catch (err: unknown) {
       this.handleMongoError(err, normalizedGallaNumber);
-      throw err; // re-throw if not handled
+      throw err;
     }
 
-    // Initialize authoritative inventory with totalPieces derived from initialStockBoxes * piecesPerBox
+    // Initialize authoritative location inventory in the selected Galla
     try {
-      await this.inventoryModel.create({
+      const inventoryPromise = this.inventoryModel.create({
         productId: product._id,
+        gallaId: resolvedGallaId,
+        gallaNumber: normalizedGallaNumber,
+        boxes: initialStockBoxes,
         totalPieces: initialTotalPieces,
       });
 
-      // Record immutable STOCK_IN transaction if initialStockBoxes > 0 and transactionModel is available
-      if (this.transactionModel && initialStockBoxes > 0) {
-        const userObjectId =
-          userId && Types.ObjectId.isValid(userId)
-            ? new Types.ObjectId(userId)
-            : new Types.ObjectId();
+      const userObjectId =
+        userId && Types.ObjectId.isValid(userId)
+          ? new Types.ObjectId(userId)
+          : new Types.ObjectId();
 
-        await this.transactionModel.create({
-          productId: product._id,
-          transactionType: InventoryTransactionType.STOCK_IN,
-          physicalPieces: initialTotalPieces,
-          salesQuantity: Types.Decimal128.fromString(String(initialStockBoxes)),
-          salesUnit: SalesUnit.BOX,
-          reason: 'Initial stock on product creation',
-          createdBy: userObjectId,
-        });
-      }
+      const transactionPromise =
+        this.transactionModel && initialStockBoxes > 0
+          ? this.transactionModel.create({
+              productId: product._id,
+              gallaId: resolvedGallaId,
+              gallaNumber: normalizedGallaNumber,
+              transactionType: InventoryTransactionType.STOCK_IN,
+              physicalPieces: initialTotalPieces,
+              salesQuantity: Types.Decimal128.fromString(String(initialStockBoxes)),
+              salesUnit: SalesUnit.BOX,
+              reason: 'Initial stock on product creation',
+              createdBy: userObjectId,
+            })
+          : Promise.resolve();
+
+      await Promise.all([inventoryPromise, transactionPromise]);
     } catch (inventoryErr: unknown) {
-      // If inventory or transaction creation fails, clean up the product to avoid orphaned records
       this.logger.error(
         `Failed to initialize inventory for product ${product._id.toString()}, rolling back product creation.`,
       );
@@ -234,6 +286,9 @@ export class ProductsService {
     // Copy scalar string fields
     if (dto.brand !== undefined) updateData['brand'] = dto.brand;
     if (dto.productName !== undefined) updateData['productName'] = dto.productName;
+    if (dto.gallaId !== undefined && Types.ObjectId.isValid(dto.gallaId)) {
+      updateData['gallaId'] = new Types.ObjectId(dto.gallaId);
+    }
     if (normalizedGallaNumber !== undefined) updateData['gallaNumber'] = normalizedGallaNumber;
     if (dto.category !== undefined) updateData['category'] = dto.category;
     if (dto.size !== undefined) updateData['size'] = dto.size;
@@ -270,7 +325,7 @@ export class ProductsService {
         .findByIdAndUpdate(id, { $set: updateData }, { new: true, runValidators: true })
         .exec();
     } catch (err: unknown) {
-      this.handleMongoError(err, normalizedGallaNumber ?? '');
+      this.handleMongoError(err, normalizedGallaNumber);
       throw err;
     }
 
@@ -327,17 +382,17 @@ export class ProductsService {
 
   /**
    * Maps known MongoDB errors to NestJS HTTP exceptions.
-   * Prevents raw database errors from leaking to API clients.
    */
-  private handleMongoError(err: unknown, gallaNumber: string): void {
+  private handleMongoError(err: unknown, gallaNumber?: string): void {
     if (
       err &&
       typeof err === 'object' &&
       'code' in err &&
       (err as { code: number }).code === MONGO_DUPLICATE_KEY_CODE
     ) {
+      // In case another unique constraint triggers
       throw new ConflictException(
-        `A product with gallaNumber "${gallaNumber}" already exists`,
+        `A record with this unique value already exists`,
       );
     }
   }

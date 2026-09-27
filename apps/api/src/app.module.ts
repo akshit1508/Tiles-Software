@@ -11,6 +11,7 @@ import { CustomersModule } from './modules/customers/customers.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { GallasModule } from './modules/gallas/gallas.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     AuthModule,
     ProductsModule,
     InventoryModule,
+    GallasModule,
     CustomersModule,
     OrdersModule,
     PaymentsModule,

@@ -43,9 +43,12 @@ export class UpdateProductDto {
   @IsOptional()
   productName?: string;
 
+  @IsOptional()
+  @IsString({ message: 'gallaId must be a valid id string' })
+  gallaId?: string;
+
   /**
-   * If updated, gallaNumber will be normalized and checked for collision with
-   * any other product. MongoDB _id never changes.
+   * If updated, gallaNumber will be normalized (trim + uppercase).
    */
   @IsString({ message: 'gallaNumber must be a string' })
   @IsNotEmpty({ message: 'gallaNumber cannot be empty' })

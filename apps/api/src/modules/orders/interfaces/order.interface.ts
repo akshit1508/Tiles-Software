@@ -2,6 +2,9 @@ import { OrderStatus, SalesUnit } from '../../../common/enums';
 
 export interface OrderItemResponse {
   productId: string;
+  gallaId?: string;
+  gallaNumberSnapshot?: string;
+  quantityBoxes?: number;
   productNameSnapshot: string;
   brandSnapshot: string;
   salesQuantity: number;

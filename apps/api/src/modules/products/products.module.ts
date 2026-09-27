@@ -10,6 +10,7 @@ import { ProductsService } from './products.service';
 import { ProductsController } from './products.controller';
 import { AuthModule } from '../auth/auth.module';
 import { CloudinaryModule } from '../cloudinary/cloudinary.module';
+import { GallasModule } from '../gallas/gallas.module';
 
 /**
  * ProductsModule — provides REST API for tile product master data.
@@ -28,6 +29,7 @@ import { CloudinaryModule } from '../cloudinary/cloudinary.module';
     ]),
     AuthModule,
     CloudinaryModule,
+    GallasModule,
   ],
   controllers: [ProductsController],
   providers: [ProductsService],

@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types, ClientSession, PipelineStage } from 'mongoose';
@@ -11,6 +12,7 @@ import {
   InventoryTransaction,
   InventoryTransactionDocument,
 } from './schemas/inventory-transaction.schema';
+import { Galla, GallaDocument } from '../gallas/schemas/galla.schema';
 import { Product, ProductDocument } from '../products/schemas/product.schema';
 import {
   StockInDto,
@@ -39,6 +41,9 @@ export class InventoryService {
     private readonly transactionModel: Model<InventoryTransactionDocument>,
     @InjectModel(Product.name)
     private readonly productModel: Model<ProductDocument>,
+    @Optional()
+    @InjectModel(Galla.name)
+    private readonly gallaModel?: Model<GallaDocument>,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -46,10 +51,10 @@ export class InventoryService {
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Returns current physical stock list with derived quantities (fullBoxes,
+   * Returns physical stock list with derived quantities (fullBoxes,
    * loosePieces, totalSqFt) and low-stock flags (totalPieces <= minimumStockPieces).
    *
-   * Supports pagination, lowStockOnly filtering, and text search across product fields.
+   * Supports pagination, lowStockOnly filtering, gallaId filtering, and text search.
    */
   async findAll(query: ListInventoryDto): Promise<PaginatedInventoryResponse> {
     const page = query.page ?? 1;
@@ -58,7 +63,12 @@ export class InventoryService {
 
     const matchConditions: Record<string, unknown> = {};
 
-    // If search term is provided, filter by product fields
+    // Filter by specific physical Galla storage location
+    if (query.gallaId && Types.ObjectId.isValid(query.gallaId)) {
+      matchConditions['gallaId'] = new Types.ObjectId(query.gallaId);
+    }
+
+    // If search term is provided, filter by product fields or gallaNumber
     if (query.search && query.search.trim() !== '') {
       const regex = { $regex: query.search.trim(), $options: 'i' };
       const matchingProducts = await this.productModel
@@ -69,7 +79,10 @@ export class InventoryService {
         .exec();
 
       const matchingProductIds = matchingProducts.map((p) => p._id);
-      matchConditions['productId'] = { $in: matchingProductIds };
+      matchConditions['$or'] = [
+        { productId: { $in: matchingProductIds } },
+        { gallaNumber: regex },
+      ];
     }
 
     // Build aggregation pipeline for accurate derived values and lowStock filter
@@ -134,6 +147,9 @@ export class InventoryService {
       return {
         _id: item._id.toString(),
         productId: item.product,
+        gallaId: item.gallaId ? item.gallaId.toString() : undefined,
+        gallaNumber: item.gallaNumber ?? item.product?.gallaNumber,
+        boxes: item.boxes !== undefined ? item.boxes : derived.fullBoxes,
         totalPieces: item.totalPieces,
         fullBoxes: derived.fullBoxes,
         loosePieces: derived.loosePieces,
@@ -159,7 +175,8 @@ export class InventoryService {
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Returns inventory details and derived unit values for a single product.
+   * Returns authoritative inventory details for a product by summing
+   * all its physical location stock records.
    */
   async findOneByProductId(productId: string): Promise<InventoryItemResponse> {
     const productObjectId = this.validateObjectId(productId, 'productId');
@@ -169,30 +186,73 @@ export class InventoryService {
       throw new NotFoundException(`Product with id ${productId} not found`);
     }
 
-    const inventory = await this.inventoryModel
-      .findOne({ productId: productObjectId })
-      .exec();
+    let records: any[] = [];
+    const findQuery = this.inventoryModel.find({ productId: productObjectId });
+    if (findQuery && typeof findQuery.exec === 'function') {
+      records = (await findQuery.exec()) || [];
+    }
 
-    if (!inventory) {
+    if (records.length === 0 && typeof this.inventoryModel.findOne === 'function') {
+      const singleQuery = this.inventoryModel.findOne({ productId: productObjectId });
+      if (singleQuery && typeof singleQuery.exec === 'function') {
+        const doc = await singleQuery.exec();
+        if (doc) records.push(doc);
+      }
+    }
+
+    if (records.length === 0) {
       throw new NotFoundException(
         `Inventory record not found for product id ${productId}`,
       );
     }
 
-    const derived = this.calculateDerived(inventory.totalPieces, product);
+    // Product total stock is derived by summing all its location inventory records
+    const totalPieces = records.reduce((sum, r) => sum + (r.totalPieces || 0), 0);
+    const totalBoxes = records.reduce((sum, r) => sum + (r.boxes || 0), 0);
+
+    const derived = this.calculateDerived(totalPieces, product);
 
     return {
-      _id: inventory._id.toString(),
+      _id: records[0]._id.toString(),
       productId: product,
-      totalPieces: inventory.totalPieces,
+      gallaId: records[0].gallaId ? records[0].gallaId.toString() : undefined,
+      gallaNumber: records.map((r) => r.gallaNumber).filter(Boolean).join(', '),
+      boxes: totalBoxes,
+      totalPieces,
       fullBoxes: derived.fullBoxes,
       loosePieces: derived.loosePieces,
       totalSqFt: derived.totalSqFt,
       minimumStockBoxes: derived.minimumStockBoxes,
       isLowStock: derived.isLowStock,
-      createdAt: (inventory as any).createdAt,
-      updatedAt: (inventory as any).updatedAt,
+      createdAt: (records[0] as any).createdAt,
+      updatedAt: (records[0] as any).updatedAt,
     };
+  }
+
+  /**
+   * Returns all physical storage locations (Gallas) containing stock for this product.
+   * Used by Order creation to let the user select the source Galla.
+   */
+  async getProductLocations(productId: string): Promise<Array<{
+    _id: string;
+    gallaId?: string;
+    gallaNumber: string;
+    boxes: number;
+    totalPieces: number;
+  }>> {
+    const productObjectId = this.validateObjectId(productId, 'productId');
+    const records = await this.inventoryModel
+      .find({ productId: productObjectId })
+      .sort({ boxes: -1, createdAt: 1 })
+      .exec();
+
+    return records.map((r) => ({
+      _id: r._id.toString(),
+      gallaId: r.gallaId ? r.gallaId.toString() : undefined,
+      gallaNumber: r.gallaNumber || 'Unassigned',
+      boxes: r.boxes || 0,
+      totalPieces: r.totalPieces || 0,
+    }));
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -222,29 +282,55 @@ export class InventoryService {
       throw new BadRequestException('quantity must be a positive integer');
     }
 
+    // Explicit physical storage location (Galla) validation — no guessing or silent fallback
+    if (!dto.gallaId || !Types.ObjectId.isValid(dto.gallaId)) {
+      throw new BadRequestException('Target Galla (gallaId) is required for stock-in operations');
+    }
+
+    const targetGallaId = new Types.ObjectId(dto.gallaId);
+    let targetGallaNumber: string | undefined = dto.gallaNumber;
+
+    if (this.gallaModel) {
+      const gallaDoc = await this.gallaModel.findById(targetGallaId).exec();
+      if (!gallaDoc) {
+        throw new NotFoundException(`Galla with id ${dto.gallaId} not found`);
+      }
+      if (!gallaDoc.isActive) {
+        throw new BadRequestException(`Cannot add stock to deactivated Galla "${gallaDoc.gallaNumber}"`);
+      }
+      targetGallaNumber = gallaDoc.gallaNumber;
+    }
+
     const physicalPieces = dto.quantity * product.piecesPerBox;
 
     const updatedInventory = await this.runInTransaction(async (session) => {
-      // 1. Atomically increment stock within transaction session
+      // 1. Atomically upsert/increment location stock within transaction session
+      const filter = targetGallaId
+        ? { productId: productObjectId, gallaId: targetGallaId }
+        : { productId: productObjectId };
+
       const inventory = await this.inventoryModel
         .findOneAndUpdate(
-          { productId: productObjectId },
-          { $inc: { totalPieces: physicalPieces } },
-          { new: true, session },
+          filter,
+          {
+            $inc: { totalPieces: physicalPieces, boxes: dto.quantity },
+            $setOnInsert: {
+              productId: productObjectId,
+              gallaId: targetGallaId,
+              gallaNumber: targetGallaNumber,
+            },
+          },
+          { upsert: true, new: true, session },
         )
         .exec();
-
-      if (!inventory) {
-        throw new NotFoundException(
-          `Inventory record not found for product id ${dto.productId}`,
-        );
-      }
 
       // 2. Record immutable audit transaction within same transaction session
       await this.transactionModel.create(
         [
           {
             productId: productObjectId,
+            gallaId: targetGallaId,
+            gallaNumber: targetGallaNumber,
             transactionType: InventoryTransactionType.STOCK_IN,
             physicalPieces: physicalPieces,
             salesQuantity: Types.Decimal128.fromString(String(dto.quantity)),

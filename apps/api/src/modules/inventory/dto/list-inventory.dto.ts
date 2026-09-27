@@ -1,4 +1,4 @@
-﻿import { IsOptional, IsInt, Min, Max, IsBoolean, IsString } from 'class-validator';
+import { IsOptional, IsInt, Min, Max, IsBoolean, IsString } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 
 /**
@@ -35,4 +35,8 @@ export class ListInventoryDto {
     typeof value === 'string' ? value.trim() : value,
   )
   search?: string;
+
+  @IsString()
+  @IsOptional()
+  gallaId?: string;
 }

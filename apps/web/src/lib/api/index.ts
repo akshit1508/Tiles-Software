@@ -7,3 +7,4 @@ export * from './orders';
 export * from './payments';
 export * from './dashboard';
 export * from './outstanding';
+export * from './gallas';

@@ -1,4 +1,4 @@
-﻿import { Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Inventory, InventorySchema } from './schemas/inventory.schema';
 import {
@@ -9,6 +9,7 @@ import { Product, ProductSchema } from '../products/schemas/product.schema';
 import { InventoryService } from './inventory.service';
 import { InventoryController } from './inventory.controller';
 import { AuthModule } from '../auth/auth.module';
+import { GallasModule } from '../gallas/gallas.module';
 
 /**
  * InventoryModule — manages physical tile stock and immutable inventory transactions.
@@ -24,6 +25,7 @@ import { AuthModule } from '../auth/auth.module';
       { name: Product.name, schema: ProductSchema },
     ]),
     AuthModule,
+    GallasModule,
   ],
   controllers: [InventoryController],
   providers: [InventoryService],

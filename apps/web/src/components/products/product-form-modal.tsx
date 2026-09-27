@@ -12,6 +12,7 @@ import {
   productsApi,
   parseDecimalValue,
 } from '@/lib/api/products';
+import { Galla, gallasApi } from '@/lib/api/gallas';
 import { ApiError } from '@/lib/api';
 
 interface ProductFormModalProps {
@@ -24,6 +25,7 @@ interface ProductFormModalProps {
 interface FormState {
   brand: string;
   productName: string;
+  gallaId: string;
   gallaNumber: string;
   category: string;
   size: string;
@@ -40,6 +42,7 @@ interface FormState {
 const initialFormState: FormState = {
   brand: '',
   productName: '',
+  gallaId: '',
   gallaNumber: '',
   category: '',
   size: '',
@@ -65,6 +68,49 @@ export function ProductFormModal({
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof FormState, string>>>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [availableGallas, setAvailableGallas] = useState<Galla[]>([]);
+  const [showCreateGalla, setShowCreateGalla] = useState(false);
+  const [newGallaNumber, setNewGallaNumber] = useState('');
+  const [newGallaName, setNewGallaName] = useState('');
+  const [isCreatingGalla, setIsCreatingGalla] = useState(false);
+  const [createGallaError, setCreateGallaError] = useState<string | null>(null);
+
+  const handleCreateGalla = async () => {
+    if (!newGallaNumber.trim()) {
+      setCreateGallaError('Galla code/number is required');
+      return;
+    }
+    try {
+      setIsCreatingGalla(true);
+      setCreateGallaError(null);
+      const created = await gallasApi.create({
+        gallaNumber: newGallaNumber.trim().toUpperCase(),
+        name: newGallaName.trim() || undefined,
+      });
+      setAvailableGallas((prev) => [created, ...prev]);
+      setForm((prev) => ({
+        ...prev,
+        gallaId: created._id,
+        gallaNumber: created.gallaNumber,
+      }));
+      if (fieldErrors.gallaNumber) {
+        setFieldErrors((prev) => ({ ...prev, gallaNumber: undefined }));
+      }
+      setShowCreateGalla(false);
+      setNewGallaNumber('');
+      setNewGallaName('');
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setCreateGallaError(err.message);
+      } else if (err instanceof Error) {
+        setCreateGallaError(err.message);
+      } else {
+        setCreateGallaError('Failed to create Galla location.');
+      }
+    } finally {
+      setIsCreatingGalla(false);
+    }
+  };
 
   // Product Photos state
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -74,11 +120,21 @@ export function ProductFormModal({
   const [isDragOver, setIsDragOver] = useState(false);
 
   useEffect(() => {
+    if (isOpen && typeof gallasApi?.list === 'function') {
+      gallasApi
+        .list({ isActive: true, limit: 100 })
+        .then((res) => setAvailableGallas(res?.data || []))
+        .catch(() => setAvailableGallas([]));
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
     if (product) {
       setForm({
         brand: product.brand,
         productName: product.productName,
-        gallaNumber: product.gallaNumber,
+        gallaId: product.gallaId || '',
+        gallaNumber: product.gallaNumber || '',
         category: product.category,
         size: product.size,
         finish: product.finish,
@@ -94,9 +150,11 @@ export function ProductFormModal({
         initialStockBoxes: String(product.initialStockBoxes ?? product.incomingBoxes ?? 0),
       });
       setImages(product.images || []);
+      setIsCustomGalla(false);
     } else {
       setForm(initialFormState);
       setImages([]);
+      setIsCustomGalla(false);
     }
     setFieldErrors({});
     setServerError(null);
@@ -229,6 +287,7 @@ export function ProductFormModal({
       const payload: CreateProductInput = {
         brand: form.brand.trim(),
         productName: form.productName.trim(),
+        gallaId: form.gallaId || undefined,
         gallaNumber: form.gallaNumber.trim().toUpperCase(),
         category: form.category.trim(),
         size: form.size.trim(),
@@ -259,7 +318,7 @@ export function ProductFormModal({
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.statusCode === 409) {
-          setServerError(`A product with Galla Number "${form.gallaNumber.trim().toUpperCase()}" already exists. Each model must have a unique Galla Number.`);
+          setServerError(err.message || 'A record with this identifier already exists.');
         } else if (err.validationErrors) {
           setServerError(
             Array.isArray(err.validationErrors)
@@ -325,16 +384,117 @@ export function ProductFormModal({
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Input
-            label="Galla Number (SKU) *"
-            placeholder="e.g. GT-A101"
-            value={form.gallaNumber}
-            onChange={(e) => handleChange('gallaNumber', e.target.value)}
-            error={fieldErrors.gallaNumber}
-            helperText="Unique shop reference identifier. Will be converted to uppercase."
-            disabled={isSubmitting}
-            required
-          />
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700">
+                Galla (Storage Location) *
+              </label>
+              {!showCreateGalla && (
+                <button
+                  type="button"
+                  onClick={() => setShowCreateGalla(true)}
+                  className="text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline flex items-center gap-1"
+                >
+                  <Plus className="h-3 w-3" /> Create New Galla
+                </button>
+              )}
+            </div>
+
+            {showCreateGalla ? (
+              <div className="rounded-lg border border-blue-200 bg-blue-50/60 p-3 space-y-2.5">
+                <div className="text-xs font-semibold text-blue-900 flex items-center justify-between">
+                  <span>Add Location to Galla Master</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowCreateGalla(false);
+                      setCreateGallaError(null);
+                    }}
+                    className="text-slate-400 hover:text-slate-600 text-xs"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                {createGallaError && (
+                  <p className="text-xs text-rose-600 font-medium">{createGallaError}</p>
+                )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <Input
+                    placeholder="Galla Code (e.g. GAL-01) *"
+                    value={newGallaNumber}
+                    onChange={(e) => setNewGallaNumber(e.target.value)}
+                    disabled={isCreatingGalla}
+                  />
+                  <Input
+                    placeholder="Section Name (e.g. North Bay)"
+                    value={newGallaName}
+                    onChange={(e) => setNewGallaName(e.target.value)}
+                    disabled={isCreatingGalla}
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setShowCreateGalla(false);
+                      setCreateGallaError(null);
+                    }}
+                    disabled={isCreatingGalla}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    onClick={handleCreateGalla}
+                    disabled={isCreatingGalla || !newGallaNumber.trim()}
+                  >
+                    {isCreatingGalla ? 'Saving...' : 'Save Galla'}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <select
+                  value={form.gallaId || ''}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    const selected = availableGallas.find((g) => g._id === val);
+                    if (selected) {
+                      setForm((prev) => ({
+                        ...prev,
+                        gallaId: selected._id,
+                        gallaNumber: selected.gallaNumber,
+                      }));
+                      if (fieldErrors.gallaNumber) {
+                        setFieldErrors((prev) => ({ ...prev, gallaNumber: undefined }));
+                      }
+                    } else {
+                      setForm((prev) => ({ ...prev, gallaId: '', gallaNumber: '' }));
+                    }
+                  }}
+                  disabled={isSubmitting}
+                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="">Select Godown Location (Galla)...</option>
+                  {availableGallas.map((g) => (
+                    <option key={g._id} value={g._id}>
+                      {g.gallaNumber} {g.name ? `— ${g.name}` : ''}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500 mt-1">
+                  Multiple products can physically reside in the same Galla.
+                </p>
+                {fieldErrors.gallaNumber && (
+                  <p className="text-xs text-rose-600 font-medium">{fieldErrors.gallaNumber}</p>
+                )}
+              </div>
+            )}
+          </div>
 
           <Input
             label="Category *"

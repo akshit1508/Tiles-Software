@@ -26,6 +26,7 @@ import { CustomerSchema } from '../modules/customers/schemas/customer.schema';
 import { OrderSchema } from '../modules/orders/schemas/order.schema';
 import { CounterSchema } from '../modules/orders/schemas/counter.schema';
 import { PaymentSchema } from '../modules/payments/schemas/payment.schema';
+import { GallaSchema } from '../modules/gallas/schemas/galla.schema';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers for type-safe schema path inspection
@@ -171,6 +172,31 @@ describe('ProductSchema', () => {
   it('has minimumStockBoxes as Number', () => {
     expect(ProductSchema.path('minimumStockBoxes').instance).toBe('Number');
   });
+
+  it('does NOT enforce unique constraint on Product.gallaNumber', () => {
+    const opts = pathOptions(ProductSchema, 'gallaNumber');
+    expect(opts.unique).toBeFalsy();
+  });
+});
+
+describe('GallaSchema', () => {
+  it('creates the schema without errors', () => {
+    expect(GallaSchema).toBeDefined();
+  });
+
+  it('has gallaNumber as a required, unique String with trim and uppercase', () => {
+    const opts = pathOptions(GallaSchema, 'gallaNumber');
+    expect(opts.required).toBe(true);
+    expect(opts.unique).toBe(true);
+    expect(opts.trim).toBe(true);
+    expect(opts.uppercase).toBe(true);
+  });
+
+  it('has isActive as Boolean with default true', () => {
+    const opts = pathOptions(GallaSchema, 'isActive');
+    expect(GallaSchema.path('isActive').instance).toBe('Boolean');
+    expect(opts.default).toBe(true);
+  });
 });
 
 describe('InventorySchema', () => {
@@ -182,9 +208,14 @@ describe('InventorySchema', () => {
     expect(InventorySchema.path('totalPieces').instance).toBe('Number');
   });
 
-  it('has productId as ObjectId with unique constraint', () => {
-    const opts = pathOptions(InventorySchema, 'productId');
-    expect(opts.unique).toBe(true);
+  it('has productId as ObjectId and compound unique index on (productId, gallaId)', () => {
+    expect(InventorySchema.path('productId').instance).toBe('ObjectId');
+    const indexes = InventorySchema.indexes();
+    const compoundUnique = indexes.find(
+      ([fields, options]) =>
+        fields.productId === 1 && fields.gallaId === 1 && options?.unique === true,
+    );
+    expect(compoundUnique).toBeDefined();
   });
 
   it('does NOT have fullBoxes, loosePieces, or totalSqFt fields (these are derived)', () => {

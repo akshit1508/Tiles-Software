@@ -55,6 +55,11 @@ export class CreateOrderItemDto {
   @IsNotEmpty({ message: 'productId is required' })
   productId: string;
 
+  /** Physical source Galla from which stock should be deducted */
+  @IsMongoId({ message: 'gallaId must be a valid MongoDB ObjectId' })
+  @IsNotEmpty({ message: 'Source Galla (gallaId) is required for each order item' })
+  gallaId: string;
+
   /**
    * Sold quantity. For BOX sales, this represents the count of complete boxes.
    * Backward-compatible with existing clients and tests.

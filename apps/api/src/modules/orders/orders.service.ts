@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types, ClientSession } from 'mongoose';
@@ -15,6 +16,7 @@ import {
   InventoryTransaction,
   InventoryTransactionDocument,
 } from '../inventory/schemas/inventory-transaction.schema';
+import { Galla, GallaDocument } from '../gallas/schemas/galla.schema';
 import { Payment, PaymentDocument } from '../payments/schemas/payment.schema';
 import { CreateOrderDto, ListOrdersDto } from './dto';
 import {
@@ -52,6 +54,9 @@ function paiseToRupees(paise: number): number {
 
 interface PreparedOrderItem {
   productId: Types.ObjectId;
+  gallaId?: Types.ObjectId;
+  gallaNumberSnapshot?: string;
+  quantityBoxes: number;
   productNameSnapshot: string;
   brandSnapshot: string;
   salesQuantity: number;
@@ -85,6 +90,9 @@ export class OrdersService {
     private readonly transactionModel: Model<InventoryTransactionDocument>,
     @InjectModel(Payment.name)
     private readonly paymentModel: Model<PaymentDocument>,
+    @Optional()
+    @InjectModel(Galla.name)
+    private readonly gallaModel?: Model<GallaDocument>,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -301,8 +309,40 @@ export class OrdersService {
           const lineTotalPaise = Math.round(rawQuantity * unitPricePaise);
           const lineTotal = paiseToRupees(lineTotalPaise);
 
+          // Resolve physical source Galla for this item — mandatory for new orders
+          if (!item.gallaId || !Types.ObjectId.isValid(item.gallaId)) {
+            throw new BadRequestException(
+              `Source Galla (gallaId) is required for product "${product.productName}". Please select which physical location to fulfill this order from.`,
+            );
+          }
+
+          const targetGallaId = new Types.ObjectId(item.gallaId);
+          const locInv = inventories.find(
+            (inv) =>
+              inv.productId.toString() === prodIdStr &&
+              inv.gallaId &&
+              inv.gallaId.toString() === item.gallaId,
+          );
+
+          let targetGallaNumber = locInv?.gallaNumber;
+          if (!targetGallaNumber && this.gallaModel) {
+            const gDoc = await this.gallaModel.findById(targetGallaId).session(session).exec();
+            targetGallaNumber = gDoc?.gallaNumber;
+          }
+
+          const itemBoxes = salesUnit === SalesUnit.BOX ? rawQuantity : Math.floor(physicalPieces / piecesPerBox);
+          const availableBoxes = locInv?.boxes ?? Math.floor((locInv?.totalPieces ?? 0) / piecesPerBox);
+          if (!locInv || availableBoxes < itemBoxes) {
+            throw new BadRequestException(
+              `Insufficient stock in Galla "${targetGallaNumber || item.gallaId}" for product "${product.productName}". Requested ${itemBoxes} boxes, but only ${availableBoxes} boxes available in this location`,
+            );
+          }
+
           preparedItems.push({
             productId: product._id,
+            gallaId: targetGallaId,
+            gallaNumberSnapshot: targetGallaNumber,
+            quantityBoxes: itemBoxes,
             productNameSnapshot: product.productName,
             brandSnapshot: product.brand,
             salesQuantity: rawQuantity,
@@ -325,9 +365,9 @@ export class OrdersService {
 
         // 5. Stock Availability Pre-check within transaction
         for (const [prodIdStr, reqPieces] of requiredPiecesByProduct.entries()) {
-          const inv = inventoryMap.get(prodIdStr);
+          const matchingInvs = inventories.filter((inv) => inv.productId.toString() === prodIdStr);
           const product = productMap.get(prodIdStr)!;
-          const availablePieces = inv ? inv.totalPieces : 0;
+          const availablePieces = matchingInvs.reduce((sum, inv) => sum + (inv.totalPieces || 0), 0);
 
           if (availablePieces < reqPieces) {
             throw new BadRequestException(
@@ -382,15 +422,59 @@ export class OrdersService {
         const seq = String(counter.seq).padStart(4, '0');
         const orderNumber = `${dateKey}-${seq}`;
 
-        // 8. Deduct Physical Pieces from Inventories atomically with $gte guard
-        for (const [prodIdStr, reqPieces] of requiredPiecesByProduct.entries()) {
+        // 8. Deduct Physical Pieces and Boxes from Location Inventories atomically with $gte guard
+        // Group by product and physical Galla location
+        const locationDeductions = new Map<
+          string,
+          {
+            productId: Types.ObjectId;
+            gallaId?: Types.ObjectId;
+            productName: string;
+            totalPieces: number;
+            totalBoxes: number;
+          }
+        >();
+
+        for (const item of preparedItems) {
+          const key = `${item.productId.toString()}_${item.gallaId ? item.gallaId.toString() : 'default'}`;
+          const existing = locationDeductions.get(key);
+          if (existing) {
+            existing.totalPieces += item.physicalPieces;
+            existing.totalBoxes += item.quantityBoxes;
+          } else {
+            locationDeductions.set(key, {
+              productId: item.productId,
+              gallaId: item.gallaId,
+              productName: item.productNameSnapshot,
+              totalPieces: item.physicalPieces,
+              totalBoxes: item.quantityBoxes,
+            });
+          }
+        }
+
+        for (const deduction of locationDeductions.values()) {
+          const filter: Record<string, unknown> = deduction.gallaId
+            ? {
+                productId: deduction.productId,
+                gallaId: deduction.gallaId,
+                totalPieces: { $gte: deduction.totalPieces },
+              }
+            : {
+                productId: deduction.productId,
+                totalPieces: { $gte: deduction.totalPieces },
+              };
+
+          const incUpdate: Record<string, number> = {
+            totalPieces: -deduction.totalPieces,
+          };
+          if (deduction.totalBoxes > 0) {
+            incUpdate.boxes = -deduction.totalBoxes;
+          }
+
           const updatedInventory = await this.inventoryModel
             .findOneAndUpdate(
-              {
-                productId: new Types.ObjectId(prodIdStr),
-                totalPieces: { $gte: reqPieces },
-              },
-              { $inc: { totalPieces: -reqPieces } },
+              filter,
+              { $inc: incUpdate },
               { new: true, session },
             )
             .exec();
@@ -408,6 +492,8 @@ export class OrdersService {
           customerId: customer._id,
           items: preparedItems.map((item) => ({
             productId: item.productId,
+            gallaId: item.gallaId,
+            gallaNumberSnapshot: item.gallaNumberSnapshot,
             productNameSnapshot: item.productNameSnapshot,
             brandSnapshot: item.brandSnapshot,
             salesQuantity: Types.Decimal128.fromString(
@@ -426,9 +512,11 @@ export class OrdersService {
 
         const [orderDoc] = await this.orderModel.create([orderData], { session });
 
-        // 10. Record SALE inventory transactions for audit trail
+        // 10. Record SALE inventory transactions for audit trail with Galla location
         const transactions = preparedItems.map((item) => ({
           productId: item.productId,
+          gallaId: item.gallaId,
+          gallaNumber: item.gallaNumberSnapshot,
           transactionType: InventoryTransactionType.SALE,
           physicalPieces: -item.physicalPieces, // Signed negative for stock removed
           salesQuantity: Types.Decimal128.fromString(
@@ -642,17 +730,50 @@ export class OrdersService {
         throw new BadRequestException('Order is already cancelled');
       }
 
-      // 1. Restore exact physical pieces to inventory for each line item
+      // 1. Restore exact physical pieces and boxes to inventory for each line item
       // Verify that each inventory update actually returns an updated document.
       // If inventory is missing, throw to abort transaction without creating SALE_REVERSAL or cancelling order.
       for (const item of order.items) {
-        const updatedInventory = await this.inventoryModel
-          .findOneAndUpdate(
-            { productId: item.productId },
-            { $inc: { totalPieces: item.physicalPieces } },
-            { new: true, session },
-          )
+        const product = await this.productModel
+          .findById(item.productId)
+          .session(session)
           .exec();
+        const piecesPerBox = product?.piecesPerBox || 1;
+        const boxesToRestore =
+          item.salesUnit === SalesUnit.BOX
+            ? Number(item.salesQuantity)
+            : Math.floor(item.physicalPieces / piecesPerBox);
+
+        let updatedInventory = null;
+        if (item.gallaId) {
+          updatedInventory = await this.inventoryModel
+            .findOneAndUpdate(
+              { productId: item.productId, gallaId: item.gallaId },
+              {
+                $inc: {
+                  totalPieces: item.physicalPieces,
+                  boxes: boxesToRestore,
+                },
+              },
+              { new: true, session },
+            )
+            .exec();
+        }
+
+        if (!updatedInventory) {
+          updatedInventory = await this.inventoryModel
+            .findOneAndUpdate(
+              { productId: item.productId },
+              {
+                $inc: {
+                  totalPieces: item.physicalPieces,
+                  boxes: boxesToRestore,
+                },
+              },
+              { new: true, session },
+            )
+            .exec();
+        }
 
         if (!updatedInventory) {
           throw new NotFoundException(
@@ -664,6 +785,8 @@ export class OrdersService {
       // 2. Record SALE_REVERSAL audit records
       const reversals = order.items.map((item) => ({
         productId: item.productId,
+        gallaId: item.gallaId,
+        gallaNumber: item.gallaNumberSnapshot,
         transactionType: InventoryTransactionType.SALE_REVERSAL,
         physicalPieces: item.physicalPieces, // Signed positive for stock restored
         salesQuantity: item.salesQuantity,
@@ -738,6 +861,13 @@ export class OrdersService {
       salesQuantity: parseFloat(item.salesQuantity.toString()),
       salesUnit: item.salesUnit,
       physicalPieces: item.physicalPieces,
+      quantityBoxes:
+        (item as any).quantityBoxes ??
+        (item.salesUnit === SalesUnit.BOX
+          ? parseFloat(item.salesQuantity.toString())
+          : undefined),
+      gallaId: item.gallaId ? item.gallaId.toString() : undefined,
+      gallaNumberSnapshot: item.gallaNumberSnapshot,
       unitPrice: paiseToRupees(toPaise(item.unitPrice)),
       lineTotal: paiseToRupees(toPaise(item.lineTotal)),
     }));

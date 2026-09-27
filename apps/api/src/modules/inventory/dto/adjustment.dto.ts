@@ -1,4 +1,4 @@
-﻿import { IsMongoId, IsNotEmpty, IsInt, NotEquals, IsString } from 'class-validator';
+import { IsMongoId, IsNotEmpty, IsInt, NotEquals, IsString, IsOptional } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 /**
@@ -13,6 +13,10 @@ export class AdjustmentDto {
   @IsMongoId({ message: 'productId must be a valid MongoDB ObjectId' })
   @IsNotEmpty({ message: 'productId is required' })
   productId: string;
+
+  @IsOptional()
+  @IsMongoId({ message: 'gallaId must be a valid MongoDB ObjectId' })
+  gallaId?: string;
 
   @IsInt({ message: 'physicalPieces must be an integer' })
   @NotEquals(0, { message: 'physicalPieces cannot be zero' })

@@ -10,7 +10,8 @@ export interface Product {
   _id: string;
   brand: string;
   productName: string;
-  gallaNumber: string;
+  gallaId?: string;
+  gallaNumber?: string;
   category: string;
   size: string;
   finish: string;
@@ -48,7 +49,8 @@ export interface ListProductsQuery {
 export interface CreateProductInput {
   brand: string;
   productName: string;
-  gallaNumber: string;
+  gallaId?: string;
+  gallaNumber?: string;
   category: string;
   size: string;
   finish: string;
@@ -67,6 +69,7 @@ export interface CreateProductInput {
 export interface UpdateProductInput {
   brand?: string;
   productName?: string;
+  gallaId?: string;
   gallaNumber?: string;
   category?: string;
   size?: string;
