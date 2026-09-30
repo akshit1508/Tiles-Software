@@ -54,9 +54,9 @@ interface AuthContextType {
 // Bootstrap timeout
 // ---------------------------------------------------------------------------
 /** Maximum ms to wait for the initial /auth/me response before treating the
- *  backend as unavailable. 8 seconds gives a generous window for cold-starts
+ *  backend as unavailable. 15 seconds gives a generous window for cold-starts
  *  without leaving the user stuck forever. */
-const BOOTSTRAP_TIMEOUT_MS = 8_000;
+const BOOTSTRAP_TIMEOUT_MS = 15_000;
 
 // ---------------------------------------------------------------------------
 // Context

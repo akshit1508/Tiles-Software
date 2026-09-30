@@ -61,6 +61,73 @@ export const reportsApi = {
   },
 
   /**
+   * Fetches the tile stock PDF as a Blob without triggering a browser download.
+   * Returns the raw Blob and the filename extracted from the response headers.
+   * Used by the WhatsApp modal to simultaneously save the PDF and open WhatsApp.
+   */
+  fetchTileStockPdfBlob: async (
+    size: string,
+    availableOnly = true,
+  ): Promise<{ blob: Blob; filename: string }> => {
+    const baseUrl = getApiBaseUrl();
+    const searchParams = new URLSearchParams({
+      size,
+      availableOnly: String(availableOnly),
+    });
+    const url = `${baseUrl}/reports/tile-stock/pdf?${searchParams.toString()}`;
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'GET',
+        credentials: 'include',
+      });
+    } catch {
+      // Retry once on transient network failure
+      await new Promise((r) => setTimeout(r, 500));
+      try {
+        response = await fetch(url, {
+          method: 'GET',
+          credentials: 'include',
+        });
+      } catch {
+        throw new ApiError({
+          statusCode: 0,
+          message: 'Unable to connect to the PDF server. Please ensure the backend is running.',
+          path: '/reports/tile-stock/pdf',
+        });
+      }
+    }
+
+    if (!response.ok) {
+      let errorMessage = 'Failed to generate PDF report.';
+      try {
+        const errorJson = await response.json();
+        errorMessage = errorJson.message || errorMessage;
+      } catch {
+        // Response is not JSON
+      }
+      throw new ApiError({
+        statusCode: response.status,
+        message: errorMessage,
+        path: '/reports/tile-stock/pdf',
+      });
+    }
+
+    let filename = `Goverdhan_Stock_${size.replace(/[*×]/g, 'x')}.pdf`;
+    const disposition = response.headers.get('content-disposition');
+    if (disposition && disposition.includes('filename=')) {
+      const match = disposition.match(/filename="?([^";]+)"?/);
+      if (match && match[1]) {
+        filename = match[1].trim();
+      }
+    }
+
+    const blob = await response.blob();
+    return { blob, filename };
+  },
+
+  /**
    * Downloads the server-generated professional PDF catalogue for the specified size.
    * Performs an authenticated fetch and triggers browser file download.
    */
@@ -75,10 +142,28 @@ export const reportsApi = {
     });
     const url = `${baseUrl}/reports/tile-stock/pdf?${searchParams.toString()}`;
 
-    const response = await fetch(url, {
-      method: 'GET',
-      credentials: 'include',
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'GET',
+        credentials: 'include',
+      });
+    } catch {
+      // Retry once on transient network failure
+      await new Promise((r) => setTimeout(r, 500));
+      try {
+        response = await fetch(url, {
+          method: 'GET',
+          credentials: 'include',
+        });
+      } catch {
+        throw new ApiError({
+          statusCode: 0,
+          message: 'Unable to connect to the PDF server. Please ensure the backend is running.',
+          path: '/reports/tile-stock/pdf',
+        });
+      }
+    }
 
     if (!response.ok) {
       let errorMessage = 'Failed to generate and download PDF report.';

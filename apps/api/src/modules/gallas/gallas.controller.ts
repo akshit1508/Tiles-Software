@@ -10,7 +10,11 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { GallasService, GallaItemResponse, GallaInventoryDetailResponse } from './gallas.service';
+import {
+  GallasService,
+  PaginatedGallasResponse,
+  GallaInventoryDetailResponse,
+} from './gallas.service';
 import { CreateGallaDto, UpdateGallaDto, ListGallasDto } from './dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -31,7 +35,7 @@ export class GallasController {
 
   @Get()
   @Roles(UserRole.OWNER)
-  findAll(@Query() query: ListGallasDto): Promise<GallaItemResponse[]> {
+  findAll(@Query() query: ListGallasDto): Promise<PaginatedGallasResponse> {
     return this.gallasService.findAll(query);
   }
 

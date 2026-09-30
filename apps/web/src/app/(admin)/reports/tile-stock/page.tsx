@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Download, FileText, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Download, FileText, Loader2, CheckCircle2, AlertCircle, Share2 } from 'lucide-react';
 import {
   Button,
   LoadingState,
@@ -13,6 +13,7 @@ import {
   TileStockReportResponse,
 } from '@/lib/api/reports';
 import { ApiError } from '@/lib/api';
+import { generateTileStockWhatsAppMessage } from '@/lib/whatsapp';
 import {
   TileStockFilters,
   TileStockSummary,
@@ -38,6 +39,11 @@ export default function TileStockReportPage() {
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [downloadSuccess, setDownloadSuccess] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  // WhatsApp share state
+  const [isSharingWhatsApp, setIsSharingWhatsApp] = useState(false);
+  const [whatsappSuccess, setWhatsappSuccess] = useState<string | null>(null);
+  const [whatsappError, setWhatsappError] = useState<string | null>(null);
 
   // Load distinct sizes on mount
   const fetchSizes = useCallback(async () => {
@@ -72,6 +78,8 @@ export default function TileStockReportPage() {
       setReportError(null);
       setDownloadSuccess(null);
       setDownloadError(null);
+      setWhatsappSuccess(null);
+      setWhatsappError(null);
 
       const response = await reportsApi.getTileStockReport({
         size: selectedSize,
@@ -128,6 +136,89 @@ export default function TileStockReportPage() {
     }
   };
 
+  /**
+   * Share on WhatsApp:
+   * 1. Generate professional message
+   * 2. Fetch PDF blob from backend
+   * 3a. Mobile: Web Share API → native share sheet with PDF + message → user picks WhatsApp & contact → sends
+   * 3b. Desktop fallback: PDF downloads + wa.me?text= opens WhatsApp with message pre-filled
+   */
+  const handleShareOnWhatsApp = async () => {
+    if (!selectedSize || isSharingWhatsApp || !reportData) return;
+
+    try {
+      setIsSharingWhatsApp(true);
+      setWhatsappError(null);
+      setWhatsappSuccess(null);
+
+      // Generate the professional catalogue message
+      const message = generateTileStockWhatsAppMessage({
+        customerName: 'Customer',
+        size: reportData.filterSize,
+        totalDesigns: reportData.summary.totalDesigns,
+        totalBoxes: reportData.summary.totalAvailableBoxes,
+      });
+
+      // Fetch PDF as blob
+      const { blob, filename } = await reportsApi.fetchTileStockPdfBlob(
+        selectedSize,
+        availableOnly,
+      );
+
+      const pdfFile = new File([blob], filename, { type: 'application/pdf' });
+
+      // Try Web Share API with file + message (works on Android/mobile Chrome & Safari)
+      if (
+        typeof navigator.share === 'function' &&
+        typeof navigator.canShare === 'function' &&
+        navigator.canShare({ files: [pdfFile] })
+      ) {
+        await navigator.share({
+          files: [pdfFile],
+          title: `Goverdhan Traders – Tile Stock ${reportData.filterSize}`,
+          text: message,
+        });
+        setWhatsappSuccess('PDF and message shared successfully via WhatsApp.');
+        setTimeout(() => setWhatsappSuccess(null), 5000);
+        return;
+      }
+
+      // Desktop fallback: download PDF + open WhatsApp with pre-filled message
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(blobUrl);
+
+      // Open WhatsApp with pre-filled message (no phone — user picks contact in WhatsApp)
+      await new Promise((r) => setTimeout(r, 400));
+      const encodedMessage = encodeURIComponent(message);
+      window.open(`https://wa.me/?text=${encodedMessage}`, '_blank', 'noopener,noreferrer');
+
+      setWhatsappSuccess(
+        `PDF "${filename}" saved. WhatsApp opened with message — select contact and attach PDF.`,
+      );
+      setTimeout(() => setWhatsappSuccess(null), 8000);
+    } catch (err) {
+      // User cancelled the share sheet — not an error
+      if (err instanceof Error && err.name === 'AbortError') {
+        return;
+      }
+      if (err instanceof ApiError) {
+        setWhatsappError(err.message);
+      } else if (err instanceof Error) {
+        setWhatsappError(err.message);
+      } else {
+        setWhatsappError('Failed to prepare PDF for sharing. Please try again.');
+      }
+    } finally {
+      setIsSharingWhatsApp(false);
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
       {/* Page Header */}
@@ -146,7 +237,7 @@ export default function TileStockReportPage() {
           </p>
         </div>
 
-        {/* Header Action: Download PDF button (when report data exists) */}
+        {/* Header Actions: Download PDF and Share on WhatsApp */}
         {reportData && reportData.items.length > 0 && (
           <div className="flex items-center gap-3">
             <Button
@@ -154,7 +245,7 @@ export default function TileStockReportPage() {
               variant="outline"
               size="md"
               onClick={handleDownloadPdf}
-              disabled={isDownloadingPdf}
+              disabled={isDownloadingPdf || isSharingWhatsApp}
               className="h-10 px-4 font-medium border-slate-300 shadow-xs hover:bg-slate-50 text-slate-800"
             >
               {isDownloadingPdf ? (
@@ -169,11 +260,54 @@ export default function TileStockReportPage() {
                 </>
               )}
             </Button>
+
+            <Button
+              type="button"
+              size="md"
+              onClick={handleShareOnWhatsApp}
+              disabled={isSharingWhatsApp || isDownloadingPdf}
+              className="h-10 px-4 font-medium bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs"
+            >
+              {isSharingWhatsApp ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Preparing...
+                </>
+              ) : (
+                <>
+                  <Share2 className="h-4 w-4 mr-2" />
+                  Share on WhatsApp
+                </>
+              )}
+            </Button>
           </div>
         )}
       </div>
 
       {/* Notifications / Feedback Banners */}
+      {whatsappSuccess && (
+        <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="h-4 w-4 text-emerald-600 flex-shrink-0" />
+            <span>{whatsappSuccess}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setWhatsappSuccess(null)}
+            className="text-xs font-semibold text-emerald-700 hover:text-emerald-900 ml-4 cursor-pointer"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {whatsappError && (
+        <div className="flex items-center gap-2.5 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+          <AlertCircle className="h-4 w-4 text-rose-600 flex-shrink-0" />
+          <span>{whatsappError}</span>
+        </div>
+      )}
+
       {downloadSuccess && (
         <div className="flex items-center gap-2.5 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
           <CheckCircle2 className="h-4 w-4 text-emerald-600 flex-shrink-0" />
@@ -198,6 +332,8 @@ export default function TileStockReportPage() {
           setReportError(null);
           setDownloadSuccess(null);
           setDownloadError(null);
+          setWhatsappSuccess(null);
+          setWhatsappError(null);
         }}
         availableOnly={availableOnly}
         onAvailableOnlyChange={(val) => {

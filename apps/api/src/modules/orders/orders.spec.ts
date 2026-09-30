@@ -81,11 +81,16 @@ function makeProduct(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeInventory(productId: Types.ObjectId, totalPieces = 40) {
+const defaultGallaId = makeObjectId();
+
+function makeInventory(productId: Types.ObjectId, totalPieces = 40, gallaId: Types.ObjectId = defaultGallaId) {
   const id = makeObjectId();
   return {
     _id: id,
     productId,
+    gallaId,
+    gallaNumber: 'GAL-01',
+    boxes: Math.floor(totalPieces / 4),
     totalPieces,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -105,6 +110,8 @@ function makeOrder(overrides: Record<string, unknown> = {}) {
     items: [
       {
         productId: prodId,
+        gallaId: defaultGallaId,
+        gallaNumberSnapshot: 'GAL-01',
         productNameSnapshot: 'Eternity Glazed Vitrified',
         brandSnapshot: 'Kajaria',
         salesQuantity: Types.Decimal128.fromString('2'),
@@ -302,6 +309,7 @@ describe('Orders Module Unit Tests', () => {
       it('validates a correct order item', async () => {
         const dto = plainToInstance(CreateOrderItemDto, {
           productId: makeObjectId().toString(),
+          gallaId: defaultGallaId.toString(),
           salesQuantity: 5,
           salesUnit: SalesUnit.BOX,
           unitPrice: 500,
@@ -313,6 +321,7 @@ describe('Orders Module Unit Tests', () => {
       it('allows unitPrice to be omitted (backend derives it)', async () => {
         const dto = plainToInstance(CreateOrderItemDto, {
           productId: makeObjectId().toString(),
+          gallaId: defaultGallaId.toString(),
           salesQuantity: 5,
           salesUnit: SalesUnit.BOX,
         });
@@ -320,9 +329,29 @@ describe('Orders Module Unit Tests', () => {
         expect(errors.length).toBe(0);
       });
 
+      it('rejects missing or invalid gallaId', async () => {
+        const dtoWithoutGalla = plainToInstance(CreateOrderItemDto, {
+          productId: makeObjectId().toString(),
+          salesQuantity: 1,
+          salesUnit: SalesUnit.BOX,
+        });
+        const errors1 = await validate(dtoWithoutGalla);
+        expect(errors1.some((e) => e.property === 'gallaId')).toBe(true);
+
+        const dtoInvalidGalla = plainToInstance(CreateOrderItemDto, {
+          productId: makeObjectId().toString(),
+          gallaId: 'invalid-id',
+          salesQuantity: 1,
+          salesUnit: SalesUnit.BOX,
+        });
+        const errors2 = await validate(dtoInvalidGalla);
+        expect(errors2.some((e) => e.property === 'gallaId')).toBe(true);
+      });
+
       it('rejects invalid productId', async () => {
         const dto = plainToInstance(CreateOrderItemDto, {
           productId: 'invalid-id',
+          gallaId: defaultGallaId.toString(),
           salesQuantity: 1,
           salesUnit: SalesUnit.BOX,
         });
@@ -333,6 +362,7 @@ describe('Orders Module Unit Tests', () => {
       it('rejects non-positive salesQuantity', async () => {
         const dto = plainToInstance(CreateOrderItemDto, {
           productId: makeObjectId().toString(),
+          gallaId: defaultGallaId.toString(),
           salesQuantity: 0,
           salesUnit: SalesUnit.BOX,
         });
@@ -343,6 +373,7 @@ describe('Orders Module Unit Tests', () => {
       it('rejects invalid salesUnit', async () => {
         const dto = plainToInstance(CreateOrderItemDto, {
           productId: makeObjectId().toString(),
+          gallaId: defaultGallaId.toString(),
           salesQuantity: 1,
           salesUnit: 'PALLET' as any,
         });
@@ -353,6 +384,7 @@ describe('Orders Module Unit Tests', () => {
       it('rejects negative unitPrice', async () => {
         const dto = plainToInstance(CreateOrderItemDto, {
           productId: makeObjectId().toString(),
+          gallaId: defaultGallaId.toString(),
           salesQuantity: 1,
           salesUnit: SalesUnit.BOX,
           unitPrice: -50,
@@ -369,6 +401,7 @@ describe('Orders Module Unit Tests', () => {
           items: [
             {
               productId: makeObjectId().toString(),
+              gallaId: defaultGallaId.toString(),
               salesQuantity: 2,
               salesUnit: SalesUnit.BOX,
             },
@@ -415,6 +448,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: makeObjectId().toString(),
+            gallaId: defaultGallaId.toString(),
             salesQuantity: 2,
             salesUnit: SalesUnit.BOX,
           },
@@ -436,6 +470,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: makeObjectId().toString(),
+            gallaId: defaultGallaId.toString(),
             salesQuantity: 2,
             salesUnit: SalesUnit.BOX,
           },
@@ -459,6 +494,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: makeObjectId().toString(),
+            gallaId: defaultGallaId.toString(),
             salesQuantity: 2,
             salesUnit: SalesUnit.BOX,
           },
@@ -485,6 +521,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: product._id.toString(),
+            gallaId: defaultGallaId.toString(),
             salesQuantity: 2,
             salesUnit: SalesUnit.BOX,
           },
@@ -511,6 +548,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: product._id.toString(),
+            gallaId: defaultGallaId.toString(),
             salesQuantity: 1.5,
             salesUnit: SalesUnit.BOX,
           },
@@ -538,6 +576,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: product._id.toString(),
+            gallaId: defaultGallaId.toString(),
             salesQuantity: 2,
             salesUnit: SalesUnit.BOX,
           },
@@ -563,6 +602,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: product._id.toString(),
+            gallaId: defaultGallaId.toString(),
             salesQuantity: 3.5,
             salesUnit: SalesUnit.PIECE,
           },
@@ -588,6 +628,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: product._id.toString(),
+            gallaId: defaultGallaId.toString(),
             salesQuantity: 5,
             salesUnit: SalesUnit.PIECE,
           },
@@ -618,6 +659,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: product._id.toString(),
+            gallaId: defaultGallaId.toString(),
             salesQuantity: 6,
             salesUnit: SalesUnit.SQ_FT,
           },
@@ -654,6 +696,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: product._id,
+            gallaId: defaultGallaId,
             productNameSnapshot: product.productName,
             brandSnapshot: product.brand,
             salesQuantity: Types.Decimal128.fromString('2'),
@@ -664,6 +707,7 @@ describe('Orders Module Unit Tests', () => {
           },
           {
             productId: product._id,
+            gallaId: defaultGallaId,
             productNameSnapshot: product.productName,
             brandSnapshot: product.brand,
             salesQuantity: Types.Decimal128.fromString('3'),
@@ -674,6 +718,7 @@ describe('Orders Module Unit Tests', () => {
           },
           {
             productId: product._id,
+            gallaId: defaultGallaId,
             productNameSnapshot: product.productName,
             brandSnapshot: product.brand,
             salesQuantity: Types.Decimal128.fromString('16'),
@@ -695,18 +740,21 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: product._id.toString(),
+            gallaId: defaultGallaId.toString(),
             salesQuantity: 2,
             salesUnit: SalesUnit.BOX,
             // unitPrice omitted -> should derive 600
           },
           {
             productId: product._id.toString(),
+            gallaId: defaultGallaId.toString(),
             salesQuantity: 3,
             salesUnit: SalesUnit.PIECE,
             // unitPrice omitted -> should derive 150
           },
           {
             productId: product._id.toString(),
+            gallaId: defaultGallaId.toString(),
             salesQuantity: 16,
             salesUnit: SalesUnit.SQ_FT,
             // unitPrice omitted -> should derive 37.50
@@ -803,6 +851,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: product._id.toString(),
+            gallaId: defaultGallaId.toString(),
             salesQuantity: 1,
             salesUnit: SalesUnit.BOX,
             unitPrice: 550, // Negotiated owner price
@@ -833,6 +882,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: product._id.toString(),
+            gallaId: defaultGallaId.toString(),
             salesQuantity: 1,
             salesUnit: SalesUnit.BOX,
           },
@@ -1002,9 +1052,9 @@ describe('Orders Module Unit Tests', () => {
       expect(result.status).toBe(OrderStatus.CANCELLED);
       expect(result.outstandingAmount).toBe(0);
 
-      // Verify inventory restoration called with +physicalPieces
+      // Verify inventory restoration called with +physicalPieces to the specific Galla
       expect(inventoryModel.findOneAndUpdate).toHaveBeenCalledWith(
-        { productId: order.items[0].productId },
+        { productId: order.items[0].productId, gallaId: order.items[0].gallaId },
         expect.objectContaining({
           $inc: expect.objectContaining({ totalPieces: order.items[0].physicalPieces }),
         }),
@@ -1102,6 +1152,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: makeObjectId().toString(),
+            gallaId: defaultGallaId.toString(),
             salesQuantity: 1,
             salesUnit: SalesUnit.BOX,
           },
@@ -1173,6 +1224,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: mockProd._id,
+            gallaId: defaultGallaId,
             productNameSnapshot: mockProd.productName,
             brandSnapshot: mockProd.brand,
             salesQuantity: Types.Decimal128.fromString('2'),
@@ -1192,6 +1244,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: mockProd._id.toString(),
+            gallaId: defaultGallaId.toString(),
             quantityBoxes: 2,
             salesUnit: SalesUnit.BOX,
           },
@@ -1215,6 +1268,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: mockProd._id,
+            gallaId: defaultGallaId,
             productNameSnapshot: mockProd.productName,
             brandSnapshot: mockProd.brand,
             salesQuantity: Types.Decimal128.fromString('2'),
@@ -1234,6 +1288,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: mockProd._id.toString(),
+            gallaId: defaultGallaId.toString(),
             quantityBoxes: 2,
             unitPrice: 600,
           },
@@ -1271,6 +1326,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: mockProd._id,
+            gallaId: defaultGallaId,
             productNameSnapshot: mockProd.productName,
             brandSnapshot: mockProd.brand,
             salesQuantity: Types.Decimal128.fromString('2'),
@@ -1290,6 +1346,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: mockProd._id.toString(),
+            gallaId: defaultGallaId.toString(),
             quantityBoxes: 2,
           },
         ],
@@ -1323,6 +1380,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: mockProd._id.toString(),
+            gallaId: defaultGallaId.toString(),
             quantityBoxes: 2, // 2 * 600 = 1200
           },
         ],
@@ -1347,6 +1405,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: mockProd._id.toString(),
+            gallaId: defaultGallaId.toString(),
             quantityBoxes: 1,
           },
         ],
@@ -1367,6 +1426,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: mockProd._id.toString(),
+            gallaId: defaultGallaId.toString(),
             quantityBoxes: 1,
           },
         ],
@@ -1390,6 +1450,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: mockProd._id,
+            gallaId: defaultGallaId,
             productNameSnapshot: mockProd.productName,
             brandSnapshot: mockProd.brand,
             salesQuantity: Types.Decimal128.fromString('1'),
@@ -1409,6 +1470,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: mockProd._id.toString(),
+            gallaId: defaultGallaId.toString(),
             quantityBoxes: 1,
           },
         ],
@@ -1428,6 +1490,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: mockProd._id,
+            gallaId: defaultGallaId,
             productNameSnapshot: mockProd.productName,
             brandSnapshot: mockProd.brand,
             salesQuantity: Types.Decimal128.fromString('2'),
@@ -1447,6 +1510,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: mockProd._id.toString(),
+            gallaId: defaultGallaId.toString(),
             quantityBoxes: 2,
           },
         ],
@@ -1480,6 +1544,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: mockProd._id.toString(),
+            gallaId: defaultGallaId.toString(),
             quantityBoxes: 1,
           },
         ],
@@ -1503,6 +1568,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: mockProd._id.toString(),
+            gallaId: defaultGallaId.toString(),
             quantityBoxes: 1,
           },
         ],
@@ -1527,6 +1593,7 @@ describe('Orders Module Unit Tests', () => {
         items: [
           {
             productId: mockProd._id.toString(),
+            gallaId: defaultGallaId.toString(),
             quantityBoxes: 3,
             // salesUnit omitted
           },

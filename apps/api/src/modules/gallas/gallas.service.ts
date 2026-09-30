@@ -23,6 +23,14 @@ export interface GallaItemResponse {
   updatedAt: Date;
 }
 
+export interface PaginatedGallasResponse {
+  data: GallaItemResponse[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
 export interface GallaInventoryDetailResponse {
   galla: {
     _id: string;
@@ -89,7 +97,11 @@ export class GallasService {
    * Returns list of Gallas with live stock summary (productCount and totalBoxes)
    * aggregated from the location inventory records.
    */
-  async findAll(query: ListGallasDto): Promise<GallaItemResponse[]> {
+  async findAll(query: ListGallasDto): Promise<PaginatedGallasResponse> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const skip = (page - 1) * limit;
+
     const filter: Record<string, unknown> = {};
 
     if (typeof query.isActive === 'boolean') {
@@ -101,13 +113,23 @@ export class GallasService {
       filter.$or = [{ gallaNumber: regex }, { name: regex }];
     }
 
+    const total = await this.gallaModel.countDocuments(filter).exec();
+
     const gallas = await this.gallaModel
       .find(filter)
       .sort({ gallaNumber: 1 })
+      .skip(skip)
+      .limit(limit)
       .exec();
 
     if (gallas.length === 0) {
-      return [];
+      return {
+        data: [],
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit) || 1,
+      };
     }
 
     const gallaIds = gallas.map((g) => g._id);
@@ -143,7 +165,7 @@ export class GallasService {
       });
     }
 
-    return gallas.map((g) => {
+    const data = gallas.map((g) => {
       const stats = statsMap.get(g._id.toString()) || { productCount: 0, totalBoxes: 0 };
       return {
         _id: g._id.toString(),
@@ -157,6 +179,14 @@ export class GallasService {
         updatedAt: (g as any).updatedAt,
       };
     });
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit) || 1,
+    };
   }
 
   /**

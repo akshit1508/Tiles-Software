@@ -66,22 +66,17 @@ export function TileStockTable({ items }: TileStockTableProps) {
           <TableRow>
             <TableHead className="w-14 text-center">#</TableHead>
             <TableHead className="w-16">Image</TableHead>
-            <TableHead className="min-w-[200px]">Product / Design</TableHead>
-            <TableHead className="w-32">Brand</TableHead>
+            <TableHead className="min-w-[180px]">Product / Design</TableHead>
+            <TableHead className="w-28">Brand</TableHead>
             <TableHead className="w-24">Size</TableHead>
+            <TableHead className="w-28 text-center">Surface Finish</TableHead>
             <TableHead className="w-32 text-right">Available Stock</TableHead>
             <TableHead className="w-28 text-center">Tiles / Box</TableHead>
-            <TableHead className="w-36 text-right">Rate / Box</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {items.map((item) => {
-            const formattedPrice = `₹${(item.sellingPricePerBox || 0).toLocaleString('en-IN', {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })}`;
-
-            const specs = [item.category, item.finish, item.color]
+            const specs = [item.category, item.color]
               .filter(Boolean)
               .join(' • ');
 
@@ -123,6 +118,13 @@ export function TileStockTable({ items }: TileStockTableProps) {
                   {item.size.replace(/[*xX]/g, ' × ')}
                 </TableCell>
 
+                {/* Surface Finish */}
+                <TableCell className="text-center">
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200">
+                    {item.finish || 'Standard'}
+                  </span>
+                </TableCell>
+
                 {/* Available Stock in Boxes */}
                 <TableCell className="text-right">
                   {item.availableBoxes > 0 ? (
@@ -140,16 +142,6 @@ export function TileStockTable({ items }: TileStockTableProps) {
                 {/* Tiles per Box */}
                 <TableCell className="text-center text-xs font-medium text-slate-700">
                   {item.piecesPerBox} pcs
-                </TableCell>
-
-                {/* Catalog Rate per Box */}
-                <TableCell className="text-right">
-                  <div className="font-bold text-slate-900 text-sm">
-                    {formattedPrice}
-                    <span className="text-xs font-normal text-slate-500 block">
-                      / Box
-                    </span>
-                  </div>
                 </TableCell>
               </TableRow>
             );

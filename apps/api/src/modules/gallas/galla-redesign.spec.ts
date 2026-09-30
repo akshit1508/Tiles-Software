@@ -555,4 +555,600 @@ describe('Galla Redesign — Option C Normalized Location Stock (Comprehensive V
       );
     });
   });
+
+  describe('Final Review Fix — Mandatory GallaId on New Stock Operations & Legacy Compatibility', () => {
+    it('1. Test new stock-in without gallaId -> rejected with BadRequestException', async () => {
+      const productModel = {
+        findById: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue({ _id: mockProductId1, piecesPerBox: 4, isActive: true }),
+        }),
+      };
+      const service = new InventoryService({} as any, {} as any, {} as any, productModel as any);
+
+      await expect(
+        service.stockIn(
+          {
+            productId: mockProductId1.toString(),
+            quantity: 5,
+            unit: SalesUnit.BOX,
+          } as any,
+          mockUserId,
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      await expect(
+        service.stockIn(
+          {
+            productId: mockProductId1.toString(),
+            quantity: 5,
+            unit: SalesUnit.BOX,
+          } as any,
+          mockUserId,
+        ),
+      ).rejects.toThrow('Target Galla (gallaId) is required for stock-in operations');
+    });
+
+    it('2. Test new order without gallaId -> rejected with BadRequestException', async () => {
+      const mockSession = {
+        startTransaction: jest.fn(),
+        commitTransaction: jest.fn().mockResolvedValue(undefined),
+        abortTransaction: jest.fn().mockResolvedValue(undefined),
+        endSession: jest.fn().mockResolvedValue(undefined),
+      };
+
+      const customerModel = {
+        findById: jest.fn().mockReturnValue({
+          session: jest.fn().mockReturnValue({
+            exec: jest.fn().mockResolvedValue({ _id: new Types.ObjectId(), isActive: true }),
+          }),
+        }),
+      };
+
+      const productModel = {
+        find: jest.fn().mockReturnValue({
+          session: jest.fn().mockReturnValue({
+            exec: jest.fn().mockResolvedValue([
+              {
+                _id: mockProductId1,
+                productName: 'Royal Slate',
+                piecesPerBox: 4,
+                areaPerBox: Types.Decimal128.fromString('16'),
+                sellingPrice: Types.Decimal128.fromString('600'),
+                isActive: true,
+              },
+            ]),
+          }),
+        }),
+      };
+
+      const inventoryModel = {
+        find: jest.fn().mockReturnValue({
+          session: jest.fn().mockReturnValue({
+            exec: jest.fn().mockResolvedValue([
+              {
+                _id: new Types.ObjectId(),
+                productId: mockProductId1,
+                gallaId: mockGallaId1,
+                boxes: 20,
+                totalPieces: 80,
+              },
+            ]),
+          }),
+        }),
+      };
+
+      const ordersService = new OrdersService(
+        { startSession: jest.fn().mockResolvedValue(mockSession) } as any,
+        {} as any,
+        {} as any,
+        customerModel as any,
+        productModel as any,
+        inventoryModel as any,
+        {} as any,
+        {} as any,
+      );
+
+      await expect(
+        ordersService.create(
+          {
+            customerId: new Types.ObjectId().toString(),
+            items: [
+              {
+                productId: mockProductId1.toString(),
+                quantityBoxes: 2,
+              } as any,
+            ],
+          },
+          mockUserId,
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      await expect(
+        ordersService.create(
+          {
+            customerId: new Types.ObjectId().toString(),
+            items: [
+              {
+                productId: mockProductId1.toString(),
+                quantityBoxes: 2,
+              } as any,
+            ],
+          },
+          mockUserId,
+        ),
+      ).rejects.toThrow('Source Galla (gallaId) is required');
+
+      expect(mockSession.abortTransaction).toHaveBeenCalled();
+    });
+
+    it('3. Test new order with selected Galla -> succeeds', async () => {
+      const mockSession = {
+        startTransaction: jest.fn(),
+        commitTransaction: jest.fn().mockResolvedValue(undefined),
+        abortTransaction: jest.fn().mockResolvedValue(undefined),
+        endSession: jest.fn().mockResolvedValue(undefined),
+      };
+
+      const customerId = new Types.ObjectId();
+      const customerModel = {
+        findById: jest.fn().mockReturnValue({
+          session: jest.fn().mockReturnValue({
+            exec: jest.fn().mockResolvedValue({ _id: customerId, name: 'Alice Customer', isActive: true }),
+          }),
+          exec: jest.fn().mockResolvedValue({ _id: customerId, name: 'Alice Customer', isActive: true }),
+        }),
+      };
+
+      const productModel = {
+        find: jest.fn().mockReturnValue({
+          session: jest.fn().mockReturnValue({
+            exec: jest.fn().mockResolvedValue([
+              {
+                _id: mockProductId1,
+                productName: 'Royal Slate',
+                brand: 'Kajaria',
+                piecesPerBox: 4,
+                areaPerBox: Types.Decimal128.fromString('16'),
+                purchasePrice: Types.Decimal128.fromString('400'),
+                sellingPrice: Types.Decimal128.fromString('600'),
+                isActive: true,
+              },
+            ]),
+          }),
+        }),
+      };
+
+      const inventoryModel = {
+        find: jest.fn().mockReturnValue({
+          session: jest.fn().mockReturnValue({
+            exec: jest.fn().mockResolvedValue([
+              {
+                _id: new Types.ObjectId(),
+                productId: mockProductId1,
+                gallaId: mockGallaId1,
+                gallaNumber: 'GAL-01',
+                boxes: 20,
+                totalPieces: 80,
+              },
+            ]),
+          }),
+        }),
+        findOneAndUpdate: jest.fn().mockReturnValue({
+          session: jest.fn().mockReturnValue({
+            exec: jest.fn().mockResolvedValue({ _id: new Types.ObjectId(), boxes: 18, totalPieces: 72 }),
+          }),
+          exec: jest.fn().mockResolvedValue({ _id: new Types.ObjectId(), boxes: 18, totalPieces: 72 }),
+        }),
+      };
+
+      const counterModel = {
+        findOneAndUpdate: jest.fn().mockResolvedValue({ seq: 101 }),
+      };
+
+      const createdOrderDoc = {
+        _id: new Types.ObjectId(),
+        orderNumber: 'GT-20260927-0101',
+        status: OrderStatus.COMPLETED,
+        customerId,
+        items: [
+          {
+            productId: mockProductId1,
+            gallaId: mockGallaId1,
+            gallaNumberSnapshot: 'GAL-01',
+            productNameSnapshot: 'Royal Slate',
+            brandSnapshot: 'Kajaria',
+            salesQuantity: Types.Decimal128.fromString('2'),
+            salesUnit: SalesUnit.BOX,
+            physicalPieces: 8,
+            quantityBoxes: 2,
+            unitPrice: Types.Decimal128.fromString('600'),
+            lineTotal: Types.Decimal128.fromString('1200'),
+          },
+        ],
+        subtotal: Types.Decimal128.fromString('1200'),
+        totalAmount: Types.Decimal128.fromString('1200'),
+        paidAmount: Types.Decimal128.fromString('0'),
+        outstandingAmount: Types.Decimal128.fromString('1200'),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const orderModel = {
+        create: jest.fn().mockResolvedValue([createdOrderDoc]),
+      };
+
+      const transactionModel = {
+        create: jest.fn().mockResolvedValue([{}]),
+      };
+
+      const ordersService = new OrdersService(
+        { startSession: jest.fn().mockResolvedValue(mockSession) } as any,
+        orderModel as any,
+        counterModel as any,
+        customerModel as any,
+        productModel as any,
+        inventoryModel as any,
+        transactionModel as any,
+        {} as any,
+      );
+
+      const res = await ordersService.create(
+        {
+          customerId: customerId.toString(),
+          items: [
+            {
+              productId: mockProductId1.toString(),
+              gallaId: mockGallaId1.toString(),
+              quantityBoxes: 2,
+            },
+          ],
+        },
+        mockUserId,
+      );
+
+      expect(res).toBeDefined();
+      expect(res.items[0].gallaId).toBe(mockGallaId1.toString());
+      expect(mockSession.commitTransaction).toHaveBeenCalled();
+    });
+
+    it('4. Test same product in two Gallas -> correct deduction only from selected Galla', async () => {
+      const mockSession = {
+        startTransaction: jest.fn(),
+        commitTransaction: jest.fn().mockResolvedValue(undefined),
+        abortTransaction: jest.fn().mockResolvedValue(undefined),
+        endSession: jest.fn().mockResolvedValue(undefined),
+      };
+
+      const customerId = new Types.ObjectId();
+      const customerModel = {
+        findById: jest.fn().mockReturnValue({
+          session: jest.fn().mockReturnValue({
+            exec: jest.fn().mockResolvedValue({ _id: customerId, name: 'Bob Buyer', isActive: true }),
+          }),
+          exec: jest.fn().mockResolvedValue({ _id: customerId, name: 'Bob Buyer', isActive: true }),
+        }),
+      };
+
+      const productModel = {
+        find: jest.fn().mockReturnValue({
+          session: jest.fn().mockReturnValue({
+            exec: jest.fn().mockResolvedValue([
+              {
+                _id: mockProductId1,
+                productName: 'Royal Slate',
+                brand: 'Kajaria',
+                piecesPerBox: 4,
+                areaPerBox: Types.Decimal128.fromString('16'),
+                purchasePrice: Types.Decimal128.fromString('400'),
+                sellingPrice: Types.Decimal128.fromString('600'),
+                isActive: true,
+              },
+            ]),
+          }),
+        }),
+      };
+
+      // Royal Slate physically in BOTH Galla 01 (50 boxes) and Galla 02 (30 boxes)
+      const inventoryGalla1 = {
+        _id: new Types.ObjectId(),
+        productId: mockProductId1,
+        gallaId: mockGallaId1,
+        gallaNumber: 'GAL-01',
+        boxes: 50,
+        totalPieces: 200,
+      };
+      const inventoryGalla2 = {
+        _id: new Types.ObjectId(),
+        productId: mockProductId1,
+        gallaId: mockGallaId2,
+        gallaNumber: 'GAL-02',
+        boxes: 30,
+        totalPieces: 120,
+      };
+
+      const inventoryModel = {
+        find: jest.fn().mockReturnValue({
+          session: jest.fn().mockReturnValue({
+            exec: jest.fn().mockResolvedValue([inventoryGalla1, inventoryGalla2]),
+          }),
+        }),
+        findOneAndUpdate: jest.fn().mockReturnValue({
+          session: jest.fn().mockReturnValue({
+            exec: jest.fn().mockResolvedValue({ ...inventoryGalla2, boxes: 20, totalPieces: 80 }),
+          }),
+          exec: jest.fn().mockResolvedValue({ ...inventoryGalla2, boxes: 20, totalPieces: 80 }),
+        }),
+      };
+
+      const counterModel = {
+        findOneAndUpdate: jest.fn().mockResolvedValue({ seq: 102 }),
+      };
+
+      const createdOrderDoc = {
+        _id: new Types.ObjectId(),
+        orderNumber: 'GT-20260927-0102',
+        status: OrderStatus.COMPLETED,
+        customerId,
+        items: [
+          {
+            productId: mockProductId1,
+            gallaId: mockGallaId2, // Customer explicitly selected Galla 02
+            gallaNumberSnapshot: 'GAL-02',
+            productNameSnapshot: 'Royal Slate',
+            brandSnapshot: 'Kajaria',
+            salesQuantity: Types.Decimal128.fromString('10'),
+            salesUnit: SalesUnit.BOX,
+            physicalPieces: 40,
+            quantityBoxes: 10,
+            unitPrice: Types.Decimal128.fromString('600'),
+            lineTotal: Types.Decimal128.fromString('6000'),
+          },
+        ],
+        subtotal: Types.Decimal128.fromString('6000'),
+        totalAmount: Types.Decimal128.fromString('6000'),
+        paidAmount: Types.Decimal128.fromString('0'),
+        outstandingAmount: Types.Decimal128.fromString('6000'),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const orderModel = {
+        create: jest.fn().mockResolvedValue([createdOrderDoc]),
+      };
+
+      const transactionModel = {
+        create: jest.fn().mockResolvedValue([{}]),
+      };
+
+      const ordersService = new OrdersService(
+        { startSession: jest.fn().mockResolvedValue(mockSession) } as any,
+        orderModel as any,
+        counterModel as any,
+        customerModel as any,
+        productModel as any,
+        inventoryModel as any,
+        transactionModel as any,
+        {} as any,
+      );
+
+      // Order 10 boxes specifically from Galla 02
+      await ordersService.create(
+        {
+          customerId: customerId.toString(),
+          items: [
+            {
+              productId: mockProductId1.toString(),
+              gallaId: mockGallaId2.toString(),
+              quantityBoxes: 10,
+            },
+          ],
+        },
+        mockUserId,
+      );
+
+      // Verify that inventory decrement was applied ONLY to mockGallaId2, NOT mockGallaId1
+      expect(inventoryModel.findOneAndUpdate).toHaveBeenCalledWith(
+        {
+          productId: mockProductId1,
+          gallaId: mockGallaId2,
+          totalPieces: { $gte: 40 },
+        },
+        {
+          $inc: {
+            totalPieces: -40,
+            boxes: -10,
+          },
+        },
+        expect.anything(),
+      );
+    });
+
+    it('5. Test cancellation -> restores original Galla', async () => {
+      const mockSession = {
+        startTransaction: jest.fn(),
+        commitTransaction: jest.fn().mockResolvedValue(undefined),
+        abortTransaction: jest.fn().mockResolvedValue(undefined),
+        endSession: jest.fn().mockResolvedValue(undefined),
+      };
+
+      // Order previously deducted from Galla 02
+      const mockOrder = {
+        _id: new Types.ObjectId(),
+        orderNumber: 'GT-20260927-0103',
+        status: OrderStatus.COMPLETED,
+        customerId: new Types.ObjectId(),
+        items: [
+          {
+            productId: mockProductId1,
+            gallaId: mockGallaId2, // Was sold from Galla 02
+            gallaNumberSnapshot: 'GAL-02',
+            productNameSnapshot: 'Royal Slate',
+            brandSnapshot: 'Kajaria',
+            salesQuantity: Types.Decimal128.fromString('10'),
+            salesUnit: SalesUnit.BOX,
+            physicalPieces: 40,
+            quantityBoxes: 10,
+            unitPrice: Types.Decimal128.fromString('600'),
+            lineTotal: Types.Decimal128.fromString('6000'),
+          },
+        ],
+        subtotal: Types.Decimal128.fromString('6000'),
+        totalAmount: Types.Decimal128.fromString('6000'),
+        paidAmount: Types.Decimal128.fromString('0'),
+        outstandingAmount: Types.Decimal128.fromString('6000'),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        save: jest.fn().mockResolvedValue(undefined),
+      };
+
+      const orderModel = {
+        findById: jest.fn().mockReturnValue({
+          session: jest.fn().mockReturnValue({
+            exec: jest.fn().mockResolvedValue(mockOrder),
+          }),
+        }),
+      };
+
+      const productModel = {
+        findById: jest.fn().mockReturnValue({
+          session: jest.fn().mockReturnValue({
+            exec: jest.fn().mockResolvedValue({ _id: mockProductId1, piecesPerBox: 4 }),
+          }),
+        }),
+      };
+
+      const inventoryModel = {
+        findOneAndUpdate: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue({}),
+        }),
+      };
+
+      const transactionModel = {
+        create: jest.fn().mockResolvedValue([{}]),
+      };
+
+      const customerModel = {
+        findById: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue({ _id: mockOrder.customerId, name: 'Bob Buyer' }),
+        }),
+      };
+
+      const paymentModel = {
+        find: jest.fn().mockReturnValue({
+          sort: jest.fn().mockReturnValue({
+            exec: jest.fn().mockResolvedValue([]),
+          }),
+        }),
+      };
+
+      const ordersService = new OrdersService(
+        { startSession: jest.fn().mockResolvedValue(mockSession) } as any,
+        orderModel as any,
+        {} as any,
+        customerModel as any,
+        productModel as any,
+        inventoryModel as any,
+        transactionModel as any,
+        paymentModel as any,
+      );
+
+      await ordersService.cancel(mockOrder._id.toString(), mockUserId);
+
+      // Verify stock was restored specifically to Galla 02
+      expect(inventoryModel.findOneAndUpdate).toHaveBeenCalledWith(
+        { productId: mockProductId1, gallaId: mockGallaId2 },
+        {
+          $inc: {
+            boxes: 10,
+            totalPieces: 40,
+          },
+        },
+        expect.objectContaining({ session: mockSession }),
+      );
+
+      // Verify SALE_REVERSAL transaction recorded with Galla 02
+      expect(transactionModel.create).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({
+            productId: mockProductId1,
+            gallaId: mockGallaId2,
+            transactionType: InventoryTransactionType.SALE_REVERSAL,
+            physicalPieces: 40,
+          }),
+        ]),
+        expect.anything(),
+      );
+    });
+
+    it('6. Test legacy order without gallaId remains readable', async () => {
+      // Historical order in MongoDB where line item does NOT have gallaId
+      const legacyOrderId = new Types.ObjectId();
+      const customerId = new Types.ObjectId();
+
+      const legacyOrderDoc = {
+        _id: legacyOrderId,
+        orderNumber: 'GT-20250101-0001',
+        status: OrderStatus.COMPLETED,
+        customerId,
+        items: [
+          {
+            productId: mockProductId1,
+            // gallaId is undefined (legacy pre-redesign order)
+            productNameSnapshot: 'Vintage Marble',
+            brandSnapshot: 'Somany',
+            salesQuantity: Types.Decimal128.fromString('4'),
+            salesUnit: SalesUnit.BOX,
+            physicalPieces: 16,
+            quantityBoxes: 4,
+            unitPrice: Types.Decimal128.fromString('500'),
+            lineTotal: Types.Decimal128.fromString('2000'),
+          },
+        ],
+        subtotal: Types.Decimal128.fromString('2000'),
+        totalAmount: Types.Decimal128.fromString('2000'),
+        paidAmount: Types.Decimal128.fromString('2000'),
+        outstandingAmount: Types.Decimal128.fromString('0'),
+        createdAt: new Date('2025-01-01'),
+        updatedAt: new Date('2025-01-01'),
+      };
+
+      const orderModel = {
+        findById: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue(legacyOrderDoc),
+        }),
+      };
+
+      const customerModel = {
+        findById: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue({ _id: customerId, name: 'Legacy Customer' }),
+        }),
+      };
+
+      const paymentModel = {
+        find: jest.fn().mockReturnValue({
+          sort: jest.fn().mockReturnValue({
+            exec: jest.fn().mockResolvedValue([]),
+          }),
+        }),
+      };
+
+      const ordersService = new OrdersService(
+        {} as any,
+        orderModel as any,
+        {} as any,
+        customerModel as any,
+        {} as any,
+        {} as any,
+        {} as any,
+        paymentModel as any,
+      );
+
+      const result = await ordersService.findOne(legacyOrderId.toString());
+      expect(result).toBeDefined();
+      expect(result.orderNumber).toBe('GT-20250101-0001');
+      expect(result.items[0].productNameSnapshot).toBe('Vintage Marble');
+      expect(result.items[0].gallaId).toBeUndefined(); // Remains readable and valid
+    });
+  });
 });
+

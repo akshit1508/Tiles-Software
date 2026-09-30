@@ -7,6 +7,7 @@ export interface RequestOptions extends Omit<RequestInit, 'method' | 'body'> {
   body?: unknown;
   params?: Record<string, string | number | boolean | undefined | null>;
   timeout?: number;
+  retries?: number;
 }
 
 /**
@@ -72,68 +73,89 @@ export async function apiClient<T>(
 
   const DEFAULT_TIMEOUT_MS = 30000;
   const timeoutMs = options.timeout ?? DEFAULT_TIMEOUT_MS;
-  const controller = new AbortController();
-  // If caller provided their own signal without explicit timeout, let caller's signal control abort
-  const timer =
-    options.signal && options.timeout === undefined
-      ? undefined
-      : setTimeout(() => controller.abort(), timeoutMs);
+  const maxRetries =
+    options.retries !== undefined
+      ? options.retries
+      : !options.method || options.method === 'GET'
+        ? 1
+        : 0;
 
-  try {
-    const response = await fetch(url, {
-      ...options,
-      method: options.method || 'GET',
-      headers,
-      body,
-      // IMPORTANT: credentials: 'include' ensures HttpOnly cookies are attached across origins
-      credentials: 'include',
-      signal: options.signal || controller.signal,
-    });
-    if (timer) clearTimeout(timer);
+  let attempt = 0;
+  while (true) {
+    const controller = new AbortController();
+    const timer =
+      options.signal && options.timeout === undefined
+        ? undefined
+        : setTimeout(() => controller.abort(), timeoutMs);
 
-    // Handle 204 No Content
-    if (response.status === 204) {
-      return {} as T;
-    }
+    try {
+      const response = await fetch(url, {
+        ...options,
+        method: options.method || 'GET',
+        headers,
+        body,
+        // IMPORTANT: credentials: 'include' ensures HttpOnly cookies are attached across origins
+        credentials: 'include',
+        signal: options.signal || controller.signal,
+      });
+      if (timer) clearTimeout(timer);
 
-    const isJson = response.headers
-      .get('content-type')
-      ?.includes('application/json');
-    const data = isJson ? await response.json() : await response.text();
+      // Handle 204 No Content
+      if (response.status === 204) {
+        return {} as T;
+      }
 
-    if (!response.ok) {
-      const errorPayload: Partial<ApiErrorPayload> =
-        typeof data === 'object' && data !== null ? data : { message: String(data) };
+      const isJson = response.headers
+        .get('content-type')
+        ?.includes('application/json');
+      const data = isJson ? await response.json() : await response.text();
 
+      if (!response.ok) {
+        const errorPayload: Partial<ApiErrorPayload> =
+          typeof data === 'object' && data !== null ? data : { message: String(data) };
+
+        throw new ApiError({
+          statusCode: response.status,
+          message: errorPayload.message || response.statusText,
+          path: errorPayload.path || normalizedEndpoint,
+          timestamp: errorPayload.timestamp,
+          errors: errorPayload.errors,
+        });
+      }
+
+      return data as T;
+    } catch (error) {
+      if (timer) clearTimeout(timer);
+      if (error instanceof ApiError) {
+        throw error;
+      }
+
+      const isTimeout =
+        (error instanceof Error && error.name === 'AbortError') ||
+        controller.signal.aborted;
+
+      const isCallerAbort = options.signal?.aborted;
+
+      // Automatically retry on transient network failures (Failed to fetch, connection resets) if not caller-aborted
+      if (!isCallerAbort && attempt < maxRetries) {
+        attempt++;
+        await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+        continue;
+      }
+
+      const rawMessage = error instanceof Error ? error.message : '';
+      const isFailedToFetch = rawMessage.toLowerCase().includes('failed to fetch');
+
+      // Network error or unexpected exception (e.g., API unavailable)
       throw new ApiError({
-        statusCode: response.status,
-        message: errorPayload.message || response.statusText,
-        path: errorPayload.path || normalizedEndpoint,
-        timestamp: errorPayload.timestamp,
-        errors: errorPayload.errors,
+        statusCode: 0,
+        message: isTimeout
+          ? 'Request timed out. The server took too long to respond.'
+          : isFailedToFetch
+            ? 'Unable to connect to the server. Please check your internet connection and ensure the backend is running.'
+            : rawMessage || 'Unable to connect to the server. Please check your internet connection or try again later.',
       });
     }
-
-    return data as T;
-  } catch (error) {
-    if (timer) clearTimeout(timer);
-    if (error instanceof ApiError) {
-      throw error;
-    }
-
-    const isTimeout =
-      (error instanceof Error && error.name === 'AbortError') ||
-      controller.signal.aborted;
-
-    // Network error or unexpected exception (e.g., API unavailable)
-    throw new ApiError({
-      statusCode: 0,
-      message: isTimeout
-        ? 'Request timed out. The server took too long to respond.'
-        : error instanceof Error
-          ? error.message
-          : 'Unable to connect to the server. Please check your internet connection or try again later.',
-    });
   }
 }
 

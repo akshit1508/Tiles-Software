@@ -12,6 +12,7 @@ import { OrdersModule } from './modules/orders/orders.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { GallasModule } from './modules/gallas/gallas.module';
+import { ReportsModule } from './modules/reports/reports.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { GallasModule } from './modules/gallas/gallas.module';
     OrdersModule,
     PaymentsModule,
     DashboardModule,
+    ReportsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

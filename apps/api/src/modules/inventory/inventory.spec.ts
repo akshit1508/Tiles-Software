@@ -324,8 +324,10 @@ describe('Inventory Module Unit Tests', () => {
       });
       transactionModel.create.mockResolvedValue([{}]);
 
+      const mockGallaId = makeObjectId();
       const dto = {
         productId: mockProduct._id.toString(),
+        gallaId: mockGallaId.toString(),
         quantity: 20,
         unit: SalesUnit.BOX as const,
       };
@@ -377,8 +379,10 @@ describe('Inventory Module Unit Tests', () => {
       });
       transactionModel.create.mockRejectedValue(new Error('Write conflict on audit log'));
 
+      const mockGallaId = makeObjectId();
       const dto = {
         productId: mockProduct._id.toString(),
+        gallaId: mockGallaId.toString(),
         quantity: 10,
         unit: SalesUnit.BOX as const,
       };
@@ -399,16 +403,18 @@ describe('Inventory Module Unit Tests', () => {
         exec: jest.fn().mockResolvedValue(mockProduct),
       });
 
+      const mockGallaId = makeObjectId().toString();
+
       await expect(
         service.stockIn(
-          { productId: mockProduct._id.toString(), quantity: 0, unit: SalesUnit.BOX },
+          { productId: mockProduct._id.toString(), gallaId: mockGallaId, quantity: 0, unit: SalesUnit.BOX },
           mockOwnerUser.id,
         ),
       ).rejects.toThrow(BadRequestException);
 
       await expect(
         service.stockIn(
-          { productId: mockProduct._id.toString(), quantity: 2.5, unit: SalesUnit.BOX },
+          { productId: mockProduct._id.toString(), gallaId: mockGallaId, quantity: 2.5, unit: SalesUnit.BOX },
           mockOwnerUser.id,
         ),
       ).rejects.toThrow(BadRequestException);
@@ -930,7 +936,8 @@ describe('Inventory Module Unit Tests', () => {
       const mockResult: any = { _id: 'inv1', totalPieces: 80 };
       jest.spyOn(service, 'stockIn').mockResolvedValue(mockResult);
 
-      const dto = { productId: 'p1', quantity: 20, unit: SalesUnit.BOX as const };
+      const mockGallaId = makeObjectId().toString();
+      const dto = { productId: 'p1', gallaId: mockGallaId, quantity: 20, unit: SalesUnit.BOX as const };
       const result = await controller.stockIn(dto, mockOwnerUser);
 
       expect(result).toEqual({ inventory: mockResult });

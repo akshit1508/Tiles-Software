@@ -10,6 +10,7 @@ jest.mock('@/lib/api/reports', () => ({
     getDistinctSizes: jest.fn(),
     getTileStockReport: jest.fn(),
     downloadTileStockPdf: jest.fn(),
+    fetchTileStockPdfBlob: jest.fn(),
   },
 }));
 
@@ -70,6 +71,10 @@ describe('Tile Stock Report Page (Phase 4)', () => {
     (reportsApi.downloadTileStockPdf as jest.Mock).mockResolvedValue({
       filename: 'Goverdhan_Stock_4x4_2026-09-28.pdf',
       sizeBytes: 45000,
+    });
+    (reportsApi.fetchTileStockPdfBlob as jest.Mock).mockResolvedValue({
+      blob: new Blob(['%PDF-1.4 mock'], { type: 'application/pdf' }),
+      filename: 'Goverdhan_Stock_4x4_2026-09-28.pdf',
     });
   });
 
@@ -172,9 +177,9 @@ describe('Tile Stock Report Page (Phase 4)', () => {
     expect(screen.getByText('Classic Glazed')).toBeInTheDocument();
     expect(screen.getByText('Staturioa Matte')).toBeInTheDocument();
     expect(screen.getByText('Kajaria')).toBeInTheDocument();
-    expect(screen.getByText('Somany')).toBeInTheDocument();
-    expect(screen.getByText('₹2,000.00')).toBeInTheDocument();
-    expect(screen.getByText('₹650.00')).toBeInTheDocument();
+    expect(screen.queryByText('₹2,000.00')).not.toBeInTheDocument();
+    expect(screen.queryByText('₹650.00')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Rate \/ Box/i)).not.toBeInTheDocument();
     expect(screen.getByText('20')).toBeInTheDocument();
     expect(screen.getByText('60')).toBeInTheDocument();
   });
@@ -331,5 +336,137 @@ describe('Tile Stock Report Page (Phase 4)', () => {
     expect(screen.queryByText(/Galla 1/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/prod-1/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/prod-2/i)).not.toBeInTheDocument();
+  });
+
+  it('12. Share on WhatsApp button is hidden initially and appears after report is generated', async () => {
+    render(<TileStockReportPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: /4 × 4/i })).toBeInTheDocument();
+    });
+
+    // Before generation, WhatsApp button is not visible
+    expect(
+      screen.queryByRole('button', { name: /Share on WhatsApp/i }),
+    ).not.toBeInTheDocument();
+
+    // Generate report
+    fireEvent.change(screen.getByLabelText(/Tile Size/i), {
+      target: { value: '4*4' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Generate Report/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /Share on WhatsApp/i }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('13. Share on WhatsApp: on desktop (no Web Share API), fetches PDF blob, downloads it and opens WhatsApp with pre-filled message', async () => {
+    // Simulate desktop — no navigator.share
+    Object.defineProperty(navigator, 'share', { value: undefined, configurable: true });
+    Object.defineProperty(navigator, 'canShare', { value: undefined, configurable: true });
+
+    const windowOpenSpy = jest.spyOn(window, 'open').mockImplementation(() => null);
+    const originalCreateObjectURL = global.URL.createObjectURL;
+    const originalRevokeObjectURL = global.URL.revokeObjectURL;
+    global.URL.createObjectURL = jest.fn(() => 'blob:mock-url');
+    global.URL.revokeObjectURL = jest.fn();
+
+    render(<TileStockReportPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: /4 × 4/i })).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText(/Tile Size/i), { target: { value: '4*4' } });
+    fireEvent.click(screen.getByRole('button', { name: /Generate Report/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Share on WhatsApp/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Share on WhatsApp/i }));
+
+    // fetchTileStockPdfBlob called with correct params
+    await waitFor(() => {
+      expect(reportsApi.fetchTileStockPdfBlob).toHaveBeenCalledWith('4*4', true);
+    });
+
+    // WhatsApp opens with wa.me?text= URL (pre-filled message, no phone — user picks contact)
+    await waitFor(() => {
+      expect(windowOpenSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/^https:\/\/wa\.me\/\?text=/),
+        '_blank',
+        'noopener,noreferrer',
+      );
+    });
+
+    // downloadTileStockPdf (the separate button) was NOT called
+    expect(reportsApi.downloadTileStockPdf).not.toHaveBeenCalled();
+
+    // Success banner shown
+    await waitFor(() => {
+      expect(
+        screen.getByText(/PDF.*saved.*WhatsApp opened with message/i),
+      ).toBeInTheDocument();
+    });
+
+    global.URL.createObjectURL = originalCreateObjectURL;
+    global.URL.revokeObjectURL = originalRevokeObjectURL;
+    windowOpenSpy.mockRestore();
+  });
+
+  it('14. Share on WhatsApp: shows error banner when PDF fetch fails', async () => {
+    Object.defineProperty(navigator, 'share', { value: undefined, configurable: true });
+    Object.defineProperty(navigator, 'canShare', { value: undefined, configurable: true });
+
+    (reportsApi.fetchTileStockPdfBlob as jest.Mock).mockRejectedValue(
+      new ApiError({ statusCode: 500, message: 'PDF generation failed on server.' }),
+    );
+
+    render(<TileStockReportPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: /4 × 4/i })).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText(/Tile Size/i), { target: { value: '4*4' } });
+    fireEvent.click(screen.getByRole('button', { name: /Generate Report/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Share on WhatsApp/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Share on WhatsApp/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/PDF generation failed on server/i)).toBeInTheDocument();
+    });
+  });
+
+  it('15. Download PDF button still functions independently alongside Share on WhatsApp', async () => {
+    render(<TileStockReportPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: /4 × 4/i })).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText(/Tile Size/i), {
+      target: { value: '4*4' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Generate Report/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Download PDF/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Share on WhatsApp/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Download PDF/i }));
+
+    await waitFor(() => {
+      expect(reportsApi.downloadTileStockPdf).toHaveBeenCalledWith('4*4', true);
+    });
   });
 });
