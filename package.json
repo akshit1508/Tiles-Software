@@ -21,7 +21,8 @@
     "lint": "npm run lint:api && npm run lint:web",
     "test:api": "npm run test --workspace=apps/api",
     "test:web": "npm run test --workspace=apps/web",
-    "seed:admin": "npm run seed:admin --workspace=apps/api"
+    "seed:admin": "npm run seed:admin --workspace=apps/api",
+    "start:api": "node apps/api/dist/main"
   },
   "engines": {
     "node": ">=20.0.0"
